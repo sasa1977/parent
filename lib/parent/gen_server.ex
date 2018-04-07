@@ -25,7 +25,7 @@ defmodule Parent.GenServer do
 
   defdelegate start_child(child_spec), to: Parent.Procdict
 
-  defdelegate shutdown_child(child_id, shutdown \\ :timer.seconds(5)), to: Parent.Procdict
+  defdelegate shutdown_child(child_name, shutdown \\ :timer.seconds(5)), to: Parent.Procdict
 
   defdelegate children(), to: Parent.Procdict, as: :entries
 

@@ -14,8 +14,8 @@ defmodule Parent.Procdict do
     end
   end
 
-  def shutdown_child(child_id, shutdown \\ :timer.seconds(5)) do
-    state = Functional.shutdown_child(state(), child_id, shutdown)
+  def shutdown_child(child_name, shutdown \\ :timer.seconds(5)) do
+    state = Functional.shutdown_child(state(), child_name, shutdown)
     store(state)
     :ok
   end

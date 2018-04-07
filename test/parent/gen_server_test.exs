@@ -32,11 +32,11 @@ defmodule Parent.GenServerTest do
   end
 
   defp verify_command(:start_job, pid) do
-    child_id = make_ref()
+    child_name = make_ref()
 
     change =
-      record_child_change(pid, child_id, fn ->
-        child_spec = %{id: child_id, start: {Agent, :start_link, [fn -> nil end]}}
+      record_child_change(pid, child_name, fn ->
+        child_spec = %{id: child_name, start: {Agent, :start_link, [fn -> nil end]}}
         Parent.GenServer.start_child(child_spec)
       end)
 
@@ -44,20 +44,20 @@ defmodule Parent.GenServerTest do
     assert {:ok, child_pid} = change.result
     assert change.after.child_pid == {:ok, child_pid}
     assert change.after.num_children == change.before.num_children + 1
-    assert Map.fetch(change.after.children, child_id) == {:ok, child_pid}
+    assert Map.fetch(change.after.children, child_name) == {:ok, child_pid}
   end
 
   defp verify_command({:stop_job, shutdown_type}, pid) do
     children = record_child_change(pid, nil, fn -> nil end).after.children
 
     if Enum.count(children) > 0 do
-      [{child_id, child_pid}] = Enum.take(children, 1)
+      [{child_name, child_pid}] = Enum.take(children, 1)
 
       mref = Process.monitor(child_pid)
 
       change =
-        record_child_change(pid, child_id, fn ->
-          stop_child(pid, child_pid, child_id, shutdown_type)
+        record_child_change(pid, child_name, fn ->
+          stop_child(pid, child_pid, child_name, shutdown_type)
         end)
 
       assert_receive {:DOWN, ^mref, :process, ^child_pid, _reason}
@@ -65,14 +65,14 @@ defmodule Parent.GenServerTest do
       change =
         Map.merge(
           change,
-          record_child_change(pid, child_id, fn -> nil end) |> Map.take([:after])
+          record_child_change(pid, child_name, fn -> nil end) |> Map.take([:after])
         )
 
       refute Process.alive?(child_pid)
       assert change.after.child? == false
       assert change.after.num_children == change.before.num_children - 1
       assert change.after.child_pid == :error
-      assert Map.fetch(change.after.children, child_id) == :error
+      assert Map.fetch(change.after.children, child_name) == :error
 
       terminated_info = Enum.find(change.after.terminated_jobs, &(&1.pid == child_pid))
 
@@ -80,7 +80,7 @@ defmodule Parent.GenServerTest do
         assert terminated_info == nil
       else
         expected_reason = if shutdown_type == :kill, do: :killed, else: shutdown_type
-        assert terminated_info == %{name: child_id, pid: child_pid, reason: expected_reason}
+        assert terminated_info == %{name: child_name, pid: child_pid, reason: expected_reason}
       end
     end
   end
@@ -118,11 +118,11 @@ defmodule Parent.GenServerTest do
     end)
   end
 
-  defp record_child_change(pid, child_id, fun) do
+  defp record_child_change(pid, child_name, fun) do
     TestServer.call(pid, fn state ->
-      before_info = parent_info(child_id)
+      before_info = parent_info(child_name)
       result = fun.()
-      after_info = parent_info(child_id)
+      after_info = parent_info(child_name)
 
       response = %{
         before: before_info,
@@ -134,13 +134,13 @@ defmodule Parent.GenServerTest do
     end)
   end
 
-  defp parent_info(child_id) do
+  defp parent_info(child_name) do
     %{
       children: Parent.GenServer.children(),
       terminated_jobs: TestServer.terminated_jobs(),
       num_children: Parent.GenServer.num_children(),
-      child_pid: Parent.GenServer.child_pid(child_id),
-      child?: Parent.GenServer.child?(:name, child_id)
+      child_pid: Parent.GenServer.child_pid(child_name),
+      child?: Parent.GenServer.child?(:name, child_name)
     }
   end
 end

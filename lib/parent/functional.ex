@@ -13,8 +13,8 @@ defmodule Parent.Functional do
          do: {:ok, pid, Registry.register(registry, full_child_spec.id, pid)}
   end
 
-  def shutdown_child(registry, child_id, shutdown \\ :timer.seconds(5)) do
-    case Registry.pid(registry, child_id) do
+  def shutdown_child(registry, child_name, shutdown \\ :timer.seconds(5)) do
+    case Registry.pid(registry, child_name) do
       :error ->
         raise "trying to terminate an unknown child"
 
