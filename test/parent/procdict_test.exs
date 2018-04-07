@@ -63,4 +63,18 @@ defmodule Parent.ProcdictTest do
       |> Task.await()
     end
   end
+
+  property "shutting down all children" do
+    check all child_specs <- child_specs(successful_child_spec()) do
+      fn ->
+        Procdict.initialize()
+        Enum.each(child_specs, &({:ok, _} = Procdict.start_child(&1)))
+        assert Procdict.size() > 0
+        Procdict.shutdown_all(:shutdown)
+        assert Procdict.size() == 0
+      end
+      |> Task.async()
+      |> Task.await()
+    end
+  end
 end

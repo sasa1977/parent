@@ -44,6 +44,40 @@ defmodule Parent.Functional do
 
   def handle_message(_registry, _other), do: :error
 
+  def shutdown_all(registry, reason, shutdown \\ :timer.seconds(5)) do
+    registry
+    |> stop_all_children_and_await_termination(shutdown_reason(reason), shutdown)
+    |> stop_all_children_and_await_termination(:kill, :infinity)
+  end
+
+  defp stop_all_children_and_await_termination(registry, reason, shutdown) do
+    pids = registry |> Registry.entries() |> Enum.map(fn {_name, pid} -> pid end)
+    Enum.each(pids, &Process.exit(&1, reason))
+    await_terminated_children(registry, pids, shutdown)
+  end
+
+  defp await_terminated_children(registry, [], _remaining_time), do: registry
+
+  defp await_terminated_children(registry, [pid | other], remaining_time) do
+    start = :erlang.monotonic_time(:millisecond)
+
+    receive do
+      {:EXIT, ^pid, _reason} ->
+        {:ok, _name, registry} = Registry.pop(registry, pid)
+        await_terminated_children(registry, other, remaining_time(remaining_time, start))
+    after
+      remaining_time -> await_terminated_children(registry, other, 0)
+    end
+  end
+
+  defp remaining_time(:infinity, _), do: :infinity
+
+  defp remaining_time(start, remaining),
+    do: max(remaining - (:erlang.monotonic_time(:millisecond) - start), 0)
+
+  defp shutdown_reason(:normal), do: :shutdown
+  defp shutdown_reason(other), do: other
+
   defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, nil})
   defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
   defp expand_child_spec(%{} = child_spec), do: child_spec

@@ -20,6 +20,12 @@ defmodule Parent.Procdict do
     :ok
   end
 
+  def shutdown_all(reason, shutdown \\ :timer.seconds(5)) do
+    state = Functional.shutdown_all(state(), reason, shutdown)
+    store(state)
+    :ok
+  end
+
   def handle_message(message) do
     with {result, state} <- Functional.handle_message(state(), message) do
       store(state)

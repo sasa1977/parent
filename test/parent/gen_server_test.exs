@@ -68,6 +68,7 @@ defmodule Parent.GenServerTest do
           record_child_change(pid, child_id, fn -> nil end) |> Map.take([:after])
         )
 
+      refute Process.alive?(child_pid)
       assert change.after.child? == false
       assert change.after.num_children == change.before.num_children - 1
       assert change.after.child_pid == :error
@@ -84,8 +85,18 @@ defmodule Parent.GenServerTest do
     end
   end
 
+  defp verify_command(:shutdown_all, pid) do
+    change =
+      record_child_change(pid, nil, fn ->
+        Parent.GenServer.shutdown_all()
+      end)
+
+    assert change.after.num_children == 0
+    Enum.each(change.before.children, fn {_name, pid} -> refute Process.alive?(pid) end)
+  end
+
   defp commands() do
-    [:test_call, :test_cast, :test_send, :start_job, {:stop_job, shutdown_type()}]
+    [:test_call, :test_cast, :test_send, :start_job, {:stop_job, shutdown_type()}, :shutdown_all]
     |> one_of()
     |> list_of()
     |> nonempty()

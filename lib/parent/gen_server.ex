@@ -35,6 +35,9 @@ defmodule Parent.GenServer do
 
   defdelegate child_pid(name), to: Parent.Procdict, as: :pid
 
+  defdelegate shutdown_all(reason \\ :shutdown, shutdown \\ :timer.seconds(5)),
+    to: Parent.Procdict
+
   def child?(:name, name), do: match?({:ok, _}, child_pid(name))
   def child?(:pid, pid), do: match?({:ok, _}, child_name(pid))
 
@@ -64,7 +67,9 @@ defmodule Parent.GenServer do
 
   @impl GenServer
   def terminate(reason, state) do
-    invoke_callback(:terminate, [reason, state])
+    result = invoke_callback(:terminate, [reason, state])
+    Parent.Procdict.shutdown_all(reason)
+    result
   end
 
   defp invoke_callback(fun, arg), do: apply(Process.get({__MODULE__, :callback}), fun, arg)
