@@ -16,7 +16,7 @@ defmodule Parent.ChildSpecGenerators do
     bind(
       id(),
       &one_of([
-        fixed_map(%{id: constant(&1), start: successful_start()}),
+        fixed_map(%{id: constant(&1), start: successful_start(), shutdown: shutdown()}),
         constant({__MODULE__, &1}),
         constant(__MODULE__)
       ])
@@ -46,6 +46,14 @@ defmodule Parent.ChildSpecGenerators do
     one_of([
       constant({Agent, :start_link, [fn -> :ok end]}),
       constant(fn -> Agent.start_link(fn -> :ok end) end)
+    ])
+  end
+
+  defp shutdown() do
+    one_of([
+      integer(0..5000),
+      :brutal_kill,
+      :infinity
     ])
   end
 

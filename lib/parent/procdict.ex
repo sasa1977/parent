@@ -1,5 +1,5 @@
 defmodule Parent.Procdict do
-  alias Parent.{Functional, Registry}
+  alias Parent.Functional
 
   def initialize() do
     if Process.get(__MODULE__) != nil, do: raise("#{__MODULE__} is already initialized")
@@ -14,14 +14,14 @@ defmodule Parent.Procdict do
     end
   end
 
-  def shutdown_child(child_name, shutdown \\ :timer.seconds(5)) do
-    state = Functional.shutdown_child(state(), child_name, shutdown)
+  def shutdown_child(child_name) do
+    state = Functional.shutdown_child(state(), child_name)
     store(state)
     :ok
   end
 
-  def shutdown_all(reason, shutdown \\ :timer.seconds(5)) do
-    state = Functional.shutdown_all(state(), reason, shutdown)
+  def shutdown_all(reason) do
+    state = Functional.shutdown_all(state(), reason)
     store(state)
     :ok
   end
@@ -33,15 +33,15 @@ defmodule Parent.Procdict do
     end
   end
 
-  def entries(), do: Registry.entries(state())
+  def entries(), do: Functional.entries(state())
 
-  def size(), do: Registry.size(state())
+  def size(), do: Functional.size(state())
 
-  def name(pid), do: Registry.name(state(), pid)
+  def name(pid), do: Functional.name(state(), pid)
 
-  def pid(name), do: Registry.pid(state(), name)
+  def pid(name), do: Functional.pid(state(), name)
 
-  def state() do
+  defp state() do
     state = Process.get(__MODULE__)
     if is_nil(state), do: raise("#{__MODULE__} is not initialized")
     state

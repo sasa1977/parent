@@ -25,7 +25,7 @@ defmodule Parent.GenServer do
 
   defdelegate start_child(child_spec), to: Parent.Procdict
 
-  defdelegate shutdown_child(child_name, shutdown \\ :timer.seconds(5)), to: Parent.Procdict
+  defdelegate shutdown_child(child_name), to: Parent.Procdict
 
   defdelegate children(), to: Parent.Procdict, as: :entries
 
@@ -35,8 +35,7 @@ defmodule Parent.GenServer do
 
   defdelegate child_pid(name), to: Parent.Procdict, as: :pid
 
-  defdelegate shutdown_all(reason \\ :shutdown, shutdown \\ :timer.seconds(5)),
-    to: Parent.Procdict
+  defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
 
   def child?(:name, name), do: match?({:ok, _}, child_pid(name))
   def child?(:pid, pid), do: match?({:ok, _}, child_name(pid))
