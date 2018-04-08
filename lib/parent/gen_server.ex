@@ -15,6 +15,20 @@ defmodule Parent.GenServer do
       use GenServer, opts
       @behaviour behaviour
 
+      @doc """
+      Returns a specification to start this module under a supervisor.
+      See `Supervisor`.
+      """
+      def child_spec(arg) do
+        default = %{
+          id: __MODULE__,
+          start: {__MODULE__, :start_link, [arg]},
+          shutdown: :infinity
+        }
+
+        Supervisor.child_spec(default, unquote(Macro.escape(opts)))
+      end
+
       @impl behaviour
       def handle_child_terminated(_name, _pid, _reason, state), do: {:noreply, state}
 
