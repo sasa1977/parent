@@ -22,7 +22,8 @@ defmodule Parent.MixProject do
   defp deps do
     [
       {:stream_data, "~> 0.4.0"},
-      {:dialyxir, "~> 0.5.0", runtime: false}
+      {:dialyxir, "~> 0.5.0", runtime: false},
+      {:ex_doc, "~> 0.16", only: :dev, runtime: false}
     ]
   end
 
