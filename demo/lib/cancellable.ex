@@ -3,7 +3,7 @@ defmodule Demo.Cancellable do
 
   def start_link(), do: Parent.GenServer.start_link(__MODULE__, nil)
 
-  def stop(pid), do: GenServer.call(pid, :stop)
+  def stop(pid), do: GenServer.stop(pid)
 
   @impl GenServer
   def init(_) do
@@ -15,11 +15,6 @@ defmodule Demo.Cancellable do
     Process.send_after(self(), :timeout, :timer.seconds(1))
 
     {:ok, nil}
-  end
-
-  @impl GenServer
-  def handle_call(:stop, _from, state) do
-    {:stop, :normal, :ok, state}
   end
 
   @impl GenServer
