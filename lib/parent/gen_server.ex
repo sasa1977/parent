@@ -83,4 +83,9 @@ defmodule Parent.GenServer do
   end
 
   defp invoke_callback(fun, arg), do: apply(Process.get({__MODULE__, :callback}), fun, arg)
+
+  @doc false
+  def child_spec(_arg) do
+    raise("#{__MODULE__} can't be used in a child spec.")
+  end
 end
