@@ -37,8 +37,7 @@ defmodule Parent.GenServer do
 
   defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
 
-  def child?(:name, name), do: match?({:ok, _}, child_pid(name))
-  def child?(:pid, pid), do: match?({:ok, _}, child_name(pid))
+  def child?(name), do: match?({:ok, _}, child_pid(name))
 
   @impl GenServer
   def init({callback, arg}) do

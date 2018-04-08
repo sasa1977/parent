@@ -140,7 +140,7 @@ defmodule Parent.GenServerTest do
       terminated_jobs: TestServer.terminated_jobs(),
       num_children: Parent.GenServer.num_children(),
       child_pid: Parent.GenServer.child_pid(child_name),
-      child?: Parent.GenServer.child?(:name, child_name)
+      child?: Parent.GenServer.child?(child_name)
     }
   end
 end

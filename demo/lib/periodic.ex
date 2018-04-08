@@ -11,7 +11,7 @@ defmodule Demo.Periodic do
 
   @impl GenServer
   def handle_info(:run_job, state) do
-    if Parent.GenServer.child?(:name, :job) do
+    if Parent.GenServer.child?(:job) do
       IO.puts("previous job already running")
     else
       Parent.GenServer.start_child(%{
