@@ -8,7 +8,8 @@ defmodule Parent.MixProject do
       elixir: "~> 1.6",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      elixirc_paths: elixirc_paths(Mix.env())
+      elixirc_paths: elixirc_paths(Mix.env()),
+      dialyzer: [plt_add_deps: :transitive]
     ]
   end
 
@@ -20,7 +21,8 @@ defmodule Parent.MixProject do
 
   defp deps do
     [
-      {:stream_data, "~> 0.4.0"}
+      {:stream_data, "~> 0.4.0"},
+      {:dialyxir, "~> 0.5.0", runtime: false}
     ]
   end
 

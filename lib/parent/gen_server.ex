@@ -1,11 +1,14 @@
 defmodule Parent.GenServer do
   use GenServer
+  use Parent.PublicTypes
 
-  @callback handle_child_terminated(any, pid, any, any) ::
+  @type state :: term
+
+  @callback handle_child_terminated(name, pid, reason :: term, state) ::
               {:noreply, new_state}
               | {:noreply, new_state, timeout | :hibernate}
               | {:stop, reason :: term, new_state}
-            when new_state: term
+            when new_state: state
 
   defmacro __using__(opts) do
     quote location: :keep, bind_quoted: [opts: opts, behaviour: __MODULE__] do
@@ -19,24 +22,33 @@ defmodule Parent.GenServer do
     end
   end
 
+  @spec start_link(module, arg :: term, GenServer.options()) :: GenServer.on_start()
   def start_link(module, arg, options \\ []) do
     GenServer.start_link(__MODULE__, {module, arg}, options)
   end
 
+  @spec start_child(in_child_spec) :: on_start_child
   defdelegate start_child(child_spec), to: Parent.Procdict
 
+  @spec shutdown_child(name) :: :ok
   defdelegate shutdown_child(child_name), to: Parent.Procdict
 
+  @spec children :: entries
   defdelegate children(), to: Parent.Procdict, as: :entries
 
+  @spec num_children() :: non_neg_integer
   defdelegate num_children(), to: Parent.Procdict, as: :size
 
+  @spec child_name(pid) :: {:ok, name} | :error
   defdelegate child_name(pid), to: Parent.Procdict, as: :name
 
+  @spec child_pid(name) :: {:ok, pid} | name
   defdelegate child_pid(name), to: Parent.Procdict, as: :pid
 
+  @spec shutdown_all(reason :: term) :: :ok
   defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
 
+  @spec child?(name) :: boolean
   def child?(name), do: match?({:ok, _}, child_pid(name))
 
   @impl GenServer

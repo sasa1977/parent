@@ -1,23 +1,35 @@
 defmodule Parent.Functional do
+  @moduledoc false
   alias Parent.Registry
+  use Parent.PublicTypes
 
+  @opaque t :: %{registry: Registry.t(), child_specs: %{pid => full_child_spec}}
+  @type on_handle_message :: {{:EXIT, pid, name, term}, t} | :error
+
+  @spec initialize() :: t
   def initialize() do
     Process.flag(:trap_exit, true)
     %{registry: Registry.new(), child_specs: %{}}
   end
 
+  @spec child_spec(t, name) :: {:ok, full_child_spec} | :error
   def child_spec(state, name) do
     with {:ok, pid} <- Registry.pid(state.registry, name), do: Map.fetch(state.child_specs, pid)
   end
 
+  @spec entries(t) :: entries
   def entries(state), do: Registry.entries(state.registry)
 
+  @spec size(t) :: non_neg_integer
   def size(state), do: Registry.size(state.registry)
 
+  @spec name(t, pid) :: {:ok, name} | :error
   def name(state, pid), do: Registry.name(state.registry, pid)
 
+  @spec pid(t, name) :: {:ok, pid} | :error
   def pid(state, name), do: Registry.pid(state.registry, name)
 
+  @spec start_child(t, in_child_spec) :: {:ok, pid, t} | term
   def start_child(state, child_spec) do
     full_child_spec = expand_child_spec(child_spec)
 
@@ -31,6 +43,7 @@ defmodule Parent.Functional do
     end
   end
 
+  @spec shutdown_child(t, name) :: t
   def shutdown_child(state, child_name) do
     case Registry.pid(state.registry, child_name) do
       :error ->
@@ -59,6 +72,7 @@ defmodule Parent.Functional do
     end
   end
 
+  @spec handle_message(t, term) :: on_handle_message
   def handle_message(state, {:EXIT, pid, reason}) do
     with {:ok, name, registry} <- Registry.pop(state.registry, pid) do
       {{:EXIT, pid, name, reason},
@@ -68,6 +82,7 @@ defmodule Parent.Functional do
 
   def handle_message(_state, _other), do: :error
 
+  @spec shutdown_all(t, term) :: t
   def shutdown_all(state, reason) do
     state = terminate_all_children(state, shutdown_reason(reason))
     Enum.each(entries(state), fn {_name, pid} -> await_child_termination(pid) end)
