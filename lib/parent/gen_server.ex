@@ -32,7 +32,7 @@ defmodule Parent.GenServer do
       @impl behaviour
       def handle_child_terminated(_name, _pid, _reason, state), do: {:noreply, state}
 
-      defoverridable handle_child_terminated: 4
+      defoverridable handle_child_terminated: 4, child_spec: 1
     end
   end
 
