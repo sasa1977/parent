@@ -54,6 +54,7 @@ defmodule Parent.ProcdictTest do
           {:ok, pid} = Procdict.pid(id(child_spec))
           assert Procdict.shutdown_child(id(child_spec)) == :ok
 
+          refute Process.alive?(pid)
           refute_receive {:EXIT, ^pid, _reason}
           assert Procdict.pid(id(child_spec)) == :error
           assert Procdict.name(pid) == :error

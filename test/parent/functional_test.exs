@@ -80,6 +80,7 @@ defmodule Parent.FunctionalTest do
       Enum.reduce(exit_data.stops, state, fn child_spec, state ->
         {:ok, pid} = Functional.pid(state, id(child_spec))
         new_state = Functional.shutdown_child(state, id(child_spec))
+        refute Process.alive?(pid)
         refute_receive {:EXIT, ^pid, _reason}
 
         assert Functional.size(new_state) == Functional.size(state) - 1
