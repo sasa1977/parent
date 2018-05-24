@@ -42,13 +42,16 @@ The principal feature of `Parent.GenServer` is the ability to start immediate ch
 
 ```elixir
 %{
-  id: term,
-  start: {module, atom, [arg :: term]} | (() -> {:ok, pid} | error :: term),
-  shutdown: non_neg_integer | :infinity | :brutal_kill
+  :id => term,
+  start => {module, atom, [arg :: term]} | (() -> {:ok, pid} | error :: term),
+  optional(:shutdown) => non_neg_integer | :infinity | :brutal_kill,
+  optional(:meta) => term
 }
 ```
 
 The shutdown field is optional, and if omitted, the default value of 5000 (5 seconds) is used. Just like with supervisors, a child spec can also be provided in the shape of `{module, arg :: term}` or `module`.
+
+The optional meta field can be used to associate arbitrary metadata to the child.
 
 Therefore, to start a task as a single child, you can write:
 
@@ -76,7 +79,7 @@ You might wonder what's the benefit of `start_child/1` vs plain `Task.start_link
 
 Another benefit is that you can use other `Parent.GenServer` functions to work with children started with `start_child/1`. You can enumerate the children, fetch individual children by their name (child spec id), and know the count of alive child processes. This is where `Parent.GenServer` serves as a kind of a unique registry.
 
-Finally, if a child terminates, the behaviour will handle the corresponding `:EXIT` message, and convert it into the callback `handle_child_terminated(child_name :: term, pid, reason :: term, state)`. This is the only callback specific to `Parent.GenServer`.
+Finally, if a child terminates, the behaviour will handle the corresponding `:EXIT` message, and convert it into the callback `handle_child_terminated(child_name :: term, meta :: term, pid, reason :: term, state)`. This is the only callback specific to `Parent.GenServer`.
 
 This pretty much covers the `Parent.GenServer` behaviour. In my opinion, it's a fairly lightweight variation of the standard `GenServer`, which makes it fairly easy to reason about (assuming the user is already familiar with `GenServer`). However, before looking at use cases, let's discuss one controversial implementation detail.
 
@@ -236,7 +239,7 @@ defmodule Demo.Cancellable do
   def handle_info(unknown_message, state), do: super(unknown_message, state)
 
   @impl Parent.GenServer
-  def handle_child_terminated(:job, _pid, reason, state) do
+  def handle_child_terminated(:job, _meta, _pid, reason, state) do
     if reason == :normal do
       IO.puts("job succeeded")
     else
@@ -291,7 +294,7 @@ defmodule Demo.Queue do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(_id, _pid, reason, state) do
+  def handle_child_terminated(_id, _meta, _pid, reason, state) do
     if reason == :normal do
       IO.puts("job succeeded")
     else

@@ -17,8 +17,8 @@ defmodule Parent.FunctionalTest do
 
       for child <- data.children do
         assert Functional.name(data.state, child.pid) == {:ok, id(child.spec)}
-        assert {:ok, child_spec} = Functional.child_spec(data.state, id(child.spec))
-        assert child_spec.id == id(child_spec)
+        assert {:ok, meta} = Functional.meta(data.state, id(child.spec))
+        assert meta == meta(child.spec)
       end
     end
   end
@@ -47,15 +47,16 @@ defmodule Parent.FunctionalTest do
         Agent.stop(pid, :shutdown)
         assert_receive {:EXIT, ^pid, reason} = message
 
-        assert {{:EXIT, ^pid, name, ^reason}, new_state} =
+        assert {{:EXIT, ^pid, name, meta, ^reason}, new_state} =
                  Functional.handle_message(state, message)
 
         assert name == id(child_spec)
+        assert meta == meta(child_spec)
 
         assert Functional.size(new_state) == Functional.size(state) - 1
         assert Functional.pid(new_state, id(child_spec)) == :error
         assert Functional.name(new_state, pid) == :error
-        assert Functional.child_spec(new_state, id(child_spec)) == :error
+        assert Functional.meta(new_state, id(child_spec)) == :error
 
         new_state
       end)
@@ -86,7 +87,7 @@ defmodule Parent.FunctionalTest do
         assert Functional.size(new_state) == Functional.size(state) - 1
         assert Functional.pid(new_state, id(child_spec)) == :error
         assert Functional.name(new_state, pid) == :error
-        assert Functional.child_spec(new_state, id(child_spec)) == :error
+        assert Functional.meta(new_state, id(child_spec)) == :error
 
         new_state
       end)
@@ -108,7 +109,23 @@ defmodule Parent.FunctionalTest do
 
       assert Functional.size(new_state) == 0
       Enum.each(data.children, &assert(Process.alive?(&1.pid) == false))
-      Enum.each(data.children, &assert(Functional.child_spec(new_state, &1.id) == :error))
+      Enum.each(data.children, &assert(Functional.meta(new_state, &1.id) == :error))
+    end
+  end
+
+  property "updating child meta" do
+    check all picks <- picks() do
+      state =
+        Enum.reduce(picks.all, Functional.initialize(), fn child_spec, state ->
+          {:ok, _pid, state} = Functional.start_child(state, child_spec)
+          state
+        end)
+
+      Enum.reduce(picks.some, state, fn child_spec, state ->
+        assert {:ok, new_state} = Functional.update_meta(state, id(child_spec), &{:updated, &1})
+        assert Functional.meta(new_state, id(child_spec)) == {:ok, {:updated, meta(child_spec)}}
+        new_state
+      end)
     end
   end
 end

@@ -21,7 +21,7 @@ defmodule Demo.Queue do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(_id, _pid, reason, state) do
+  def handle_child_terminated(_id, _meta, _pid, reason, state) do
     if reason == :normal do
       IO.puts("job succeeded")
     else

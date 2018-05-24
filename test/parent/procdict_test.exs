@@ -6,76 +6,81 @@ defmodule Parent.ProcdictTest do
 
   property "started processes are registered" do
     check all child_specs <- child_specs(successful_child_spec()) do
-      fn ->
-        Procdict.initialize()
+      init()
 
-        child_specs
-        |> Enum.map(fn child_spec ->
-          assert {:ok, pid} = Procdict.start_child(child_spec)
-          %{id: id(child_spec), pid: pid}
-        end)
-        |> Enum.each(&assert(Procdict.name(&1.pid) == {:ok, &1.id}))
-      end
-      |> Task.async()
-      |> Task.await()
+      child_specs
+      |> Enum.map(fn child_spec ->
+        assert {:ok, pid} = Procdict.start_child(child_spec)
+        %{id: id(child_spec), meta: meta(child_spec), pid: pid}
+      end)
+      |> Enum.each(fn data ->
+        assert Procdict.name(data.pid) == {:ok, data.id}
+        assert Procdict.meta(data.id) == {:ok, data.meta}
+      end)
     end
   end
 
   property "handling of exit messages" do
     check all exit_data <- exit_data() do
-      fn ->
-        Procdict.initialize()
-        Enum.each(exit_data.starts, &Procdict.start_child/1)
+      init()
+      Enum.each(exit_data.starts, &Procdict.start_child/1)
 
-        Enum.each(exit_data.stops, fn child_spec ->
-          {:ok, pid} = Procdict.pid(id(child_spec))
-          Agent.stop(pid, :shutdown)
+      Enum.each(exit_data.stops, fn child_spec ->
+        {:ok, pid} = Procdict.pid(id(child_spec))
+        Agent.stop(pid, :shutdown)
 
-          assert_receive {:EXIT, ^pid, reason} = message
-          assert {:EXIT, ^pid, name, ^reason} = Procdict.handle_message(message)
-          assert name == id(child_spec)
+        assert_receive {:EXIT, ^pid, reason} = message
+        assert {:EXIT, ^pid, name, meta, ^reason} = Procdict.handle_message(message)
+        assert name == id(child_spec)
+        assert meta == meta(child_spec)
 
-          assert Procdict.pid(id(child_spec)) == :error
-          assert Procdict.name(pid) == :error
-        end)
-      end
-      |> Task.async()
-      |> Task.await()
+        assert Procdict.pid(id(child_spec)) == :error
+        assert Procdict.name(pid) == :error
+      end)
     end
   end
 
   property "shutting down children" do
     check all exit_data <- exit_data(), max_runs: 5 do
-      fn ->
-        Procdict.initialize()
-        Enum.each(exit_data.starts, &Procdict.start_child/1)
+      init()
+      Enum.each(exit_data.starts, &Procdict.start_child/1)
 
-        Enum.each(exit_data.stops, fn child_spec ->
-          {:ok, pid} = Procdict.pid(id(child_spec))
-          assert Procdict.shutdown_child(id(child_spec)) == :ok
+      Enum.each(exit_data.stops, fn child_spec ->
+        {:ok, pid} = Procdict.pid(id(child_spec))
+        assert Procdict.shutdown_child(id(child_spec)) == :ok
 
-          refute Process.alive?(pid)
-          refute_receive {:EXIT, ^pid, _reason}
-          assert Procdict.pid(id(child_spec)) == :error
-          assert Procdict.name(pid) == :error
-        end)
-      end
-      |> Task.async()
-      |> Task.await()
+        refute Process.alive?(pid)
+        refute_receive {:EXIT, ^pid, _reason}
+        assert Procdict.pid(id(child_spec)) == :error
+        assert Procdict.name(pid) == :error
+      end)
     end
   end
 
   property "shutting down all children" do
     check all child_specs <- child_specs(successful_child_spec()) do
-      fn ->
-        Procdict.initialize()
-        Enum.each(child_specs, &({:ok, _} = Procdict.start_child(&1)))
-        assert Procdict.size() > 0
-        Procdict.shutdown_all(:shutdown)
-        assert Procdict.size() == 0
-      end
-      |> Task.async()
-      |> Task.await()
+      init()
+      Enum.each(child_specs, &({:ok, _} = Procdict.start_child(&1)))
+      assert Procdict.size() > 0
+      Procdict.shutdown_all(:shutdown)
+      assert Procdict.size() == 0
     end
+  end
+
+  property "updating child meta" do
+    check all picks <- picks() do
+      init()
+      Enum.each(picks.all, &({:ok, _} = Procdict.start_child(&1)))
+
+      meta_updater = &{:updated, &1}
+      Enum.each(picks.some, &(:ok = Procdict.update_meta(id(&1), meta_updater)))
+
+      Enum.each(picks.some, &assert(Procdict.meta(id(&1)) == {:ok, {:updated, meta(&1)}}))
+    end
+  end
+
+  defp init() do
+    unless Procdict.initialized?(), do: Procdict.initialize()
+    Procdict.shutdown_all(:kill)
   end
 end

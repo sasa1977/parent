@@ -26,7 +26,7 @@ defmodule Demo.Cancellable do
   def handle_info(unknown_message, state), do: super(unknown_message, state)
 
   @impl Parent.GenServer
-  def handle_child_terminated(:job, _pid, reason, state) do
+  def handle_child_terminated(:job, _meta, _pid, reason, state) do
     if reason == :normal do
       IO.puts("job succeeded")
     else

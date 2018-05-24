@@ -30,8 +30,8 @@ defmodule Parent.TestServer do
   def handle_info(fun, state), do: {:noreply, fun.(state)}
 
   @impl Parent.GenServer
-  def handle_child_terminated(name, pid, reason, state) do
-    termination_info = %{name: name, pid: pid, reason: reason}
+  def handle_child_terminated(name, meta, pid, reason, state) do
+    termination_info = %{name: name, meta: meta, pid: pid, reason: reason}
     Process.put(:terminated_jobs, [termination_info | Process.get(:terminated_jobs)])
     {:noreply, state}
   end

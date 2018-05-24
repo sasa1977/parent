@@ -12,11 +12,20 @@ defmodule Parent.ChildSpecGenerators do
   def id({_mod, arg}), do: arg
   def id(mod) when is_atom(mod), do: nil
 
+  def meta(%{meta: meta}), do: meta
+  def meta({_mod, arg}), do: arg
+  def meta(mod) when is_atom(mod), do: nil
+
   def successful_child_spec() do
     bind(
       id(),
       &one_of([
-        fixed_map(%{id: constant(&1), start: successful_start(), shutdown: shutdown()}),
+        fixed_map(%{
+          id: constant(&1),
+          start: successful_start(),
+          shutdown: shutdown(),
+          meta: small_term()
+        }),
         constant({__MODULE__, &1}),
         constant(__MODULE__)
       ])
@@ -37,10 +46,20 @@ defmodule Parent.ChildSpecGenerators do
     )
   end
 
+  def picks() do
+    bind(
+      child_specs(successful_child_spec()),
+      &fixed_map(%{
+        all: constant(&1),
+        some: bind(nonempty(list_of(member_of(&1))), fn some -> constant(Enum.uniq(some)) end)
+      })
+    )
+  end
+
   defp id(), do: StreamData.scale(term(), fn _size -> 2 end)
 
   @doc false
-  def child_spec(arg), do: %{id: arg, start: fn -> Agent.start_link(fn -> :ok end) end}
+  def child_spec(arg), do: %{id: arg, start: fn -> Agent.start_link(fn -> :ok end) end, meta: arg}
 
   defp successful_start() do
     one_of([
@@ -56,6 +75,8 @@ defmodule Parent.ChildSpecGenerators do
       :infinity
     ])
   end
+
+  defp small_term(), do: StreamData.scale(term(), fn _size -> 2 end)
 
   @doc false
   def test_start(), do: {:error, :not_started}
