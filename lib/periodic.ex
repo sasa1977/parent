@@ -58,10 +58,58 @@ defmodule Periodic do
 
   If you pass the `:infinity` as the timeout value, the job will not be executed.
   This can be useful to disable the job in some environments (e.g. in `:test`).
+
+  ## Logging
+
+  By default, nothing is logged. You can however, turn logging with `:log_level` and `:log_meta` options.
+  See the timeout example for usage.
+
+  ## Timeout
+
+  You can also pass the :timeout option:
+
+  ```
+  Supervisor.start_link(
+    [
+      {Periodic,
+        run: {Process, :sleep, [:infinity]}, every: :timer.seconds(1),
+        overlap?: false,
+        timeout: :timer.seconds(2),
+        strategy: :one_for_one,
+        log_level: :debug,
+        log_meta: [job_id: :my_job]
+      }
+    ],
+    strategy: :one_for_one
+  )
+
+  job_id=my_job [debug] starting the job
+  job_id=my_job [debug] previous job still running, not starting another instance
+  job_id=my_job [debug] job timeout
+  job_id=my_job [debug] starting the job
+  job_id=my_job [debug] previous job still running, not starting another instance
+  job_id=my_job [debug] job timeout
+  ...
+  ```
+
+  ## Shutdown
+
+  Since periodic executor is a plain supervisor child, shutting down is not
+  explicitly supported. If you want to stop the job, just take it down via its
+  supervisor, or shut down either of its ancestors.
   """
   use Parent.GenServer
+  require Logger
 
-  @type opts :: [every: non_neg_integer | :infinity, run: job_spec, overlap?: boolean]
+  @type opts :: [
+          every: duration,
+          run: job_spec,
+          overlap?: boolean,
+          timeout: duration,
+          log_level: nil | Logger.level(),
+          log_meta: Keyword.t()
+        ]
+  @type duration :: non_neg_integer | :infinity
   @type job_spec :: (() -> term) | {module, atom, [term]}
 
   @doc "Starts the periodic executor."
@@ -78,31 +126,71 @@ defmodule Periodic do
 
   @impl GenServer
   def init(opts) do
-    state = defaults() |> Map.merge(opts)
+    state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
     enqueue_next(state)
     {:ok, state}
   end
 
   @impl GenServer
   def handle_info(:run_job, state) do
-    if state.overlap? == true or not job_running?(), do: start_job(state)
+    maybe_start_job(state)
     enqueue_next(state)
+    {:noreply, state}
+  end
+
+  def handle_info({:timeout, job_id}, state) do
+    Parent.GenServer.shutdown_child(job_id)
+    log(state, "job timeout")
     {:noreply, state}
   end
 
   def handle_info(unknown_message, state), do: super(unknown_message, state)
 
-  defp defaults(), do: %{overlap?: true}
+  @impl Parent.GenServer
+  def handle_child_terminated(name, timer, _pid, _reason, state) do
+    if timer != nil do
+      Process.cancel_timer(timer)
+
+      # flush the message if it's already in the mailbox
+      receive do
+        {:timeout, ^name} -> :ok
+      after
+        0 -> :ok
+      end
+    end
+
+    log(state, "job finished")
+
+    {:noreply, state}
+  end
+
+  defp defaults(), do: %{overlap?: true, timeout: :infinity, log_level: nil, log_meta: []}
+
+  defp maybe_start_job(state) do
+    if state.overlap? == true or not job_running?() do
+      start_job(state)
+    else
+      log(state, "previous job still running, not starting another instance")
+    end
+  end
 
   defp job_running?(), do: Parent.GenServer.child?(:job)
 
   defp start_job(state) do
+    log(state, "starting the job")
     id = if state.overlap?, do: make_ref(), else: :job
     job = state.run
 
+    timer =
+      if state.timeout != :infinity,
+        do: Process.send_after(self(), {:timeout, id}, state.timeout),
+        else: nil
+
     Parent.GenServer.start_child(%{
       id: id,
-      start: {Task, :start_link, [fn -> invoke_job(job) end]}
+      start: {Task, :start_link, [fn -> invoke_job(job) end]},
+      meta: timer,
+      shutdown: :brutal_kill
     })
   end
 
@@ -111,4 +199,8 @@ defmodule Periodic do
 
   defp enqueue_next(%{every: :infinity}), do: :ok
   defp enqueue_next(state), do: Process.send_after(self(), :run_job, state.every)
+
+  defp log(state, message) do
+    if not is_nil(state.log_level), do: Logger.log(state.log_level, message, state.log_meta)
+  end
 end

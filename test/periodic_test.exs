@@ -35,6 +35,31 @@ defmodule PeriodicTest do
     assert_receive :running, 200
   end
 
+  test "timeout with overlap" do
+    Periodic.start_link(
+      every: 100,
+      run: pinger(fn -> :timer.sleep(:infinity) end),
+      timeout: 150,
+      overlap?: true
+    )
+
+    assert_receive :running, 200
+    assert_receive :running, 200
+    assert_receive :running, 200
+  end
+
+  test "timeout with no overlap" do
+    Periodic.start_link(
+      every: 100,
+      run: pinger(fn -> :timer.sleep(:infinity) end),
+      timeout: 100,
+      overlap?: false
+    )
+
+    assert_receive :running, 200
+    assert_receive :running, 200
+  end
+
   defp pinger(extra \\ fn -> :ok end) do
     owner = self()
 
