@@ -199,6 +199,8 @@ Personally, I think that `Parent.GenServer` might be a better option in the foll
 
 In my limited experience, most of periodic jobs I wanted to run had these properties, and so parent based periodic execution seems like a compelling choice.
 
+As a more elaborate demo checkout the [Periodic module](./lib/periodic.ex) which provides a generic periodic runner.
+
 ## Cancellation and timeout
 
 In this scenario we have the following needs:
