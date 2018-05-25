@@ -8,7 +8,7 @@ defmodule Parent.PublicTypes do
                 :id => name,
                 :start => start,
                 optional(:meta) => child_meta,
-                optional(:shutdown) => :shutdown
+                optional(:shutdown) => shutdown
               }
               | module
               | {module, term}
