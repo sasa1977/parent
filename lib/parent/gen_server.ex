@@ -105,9 +105,9 @@ defmodule Parent.GenServer do
 
   @impl GenServer
   def terminate(reason, state) do
-    result = invoke_callback(:terminate, [reason, state])
+    invoke_callback(:terminate, [reason, state])
+  after
     Parent.Procdict.shutdown_all(reason)
-    result
   end
 
   defp invoke_callback(fun, arg), do: apply(Process.get({__MODULE__, :callback}), fun, arg)
