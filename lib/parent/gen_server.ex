@@ -96,6 +96,14 @@ defmodule Parent.GenServer do
   def handle_cast(message, state), do: invoke_callback(:handle_cast, [message, state])
 
   @impl GenServer
+  def format_status(reason, pdict_and_state),
+    do: invoke_callback(:format_status, [reason, pdict_and_state])
+
+  @impl GenServer
+  def code_change(old_vsn, state, extra),
+    do: invoke_callback(:code_change, [old_vsn, state, extra])
+
+  @impl GenServer
   def terminate(reason, state) do
     result = invoke_callback(:terminate, [reason, state])
     Parent.Procdict.shutdown_all(reason)
