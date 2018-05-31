@@ -56,6 +56,33 @@ defmodule Parent.GenServerTest do
     assert {^child_id, ^child_pid, {^child_id, :meta}} = child
   end
 
+  defp verify_command(:start_timeout_job, pid) do
+    child_id = make_ref()
+
+    child_pid =
+      TestServer.call(pid, fn state ->
+        meta = {child_id, :meta}
+
+        child_spec = %{
+          id: child_id,
+          start: {Agent, :start_link, [fn -> nil end]},
+          meta: meta,
+          timeout: 1
+        }
+
+        {:ok, child_pid} = Parent.GenServer.start_child(child_spec)
+        {child_pid, state}
+      end)
+
+    mref = Process.monitor(child_pid)
+    assert_receive {:DOWN, ^mref, _, _, _reason}
+
+    terminated_jobs = TestServer.call(pid, fn state -> {TestServer.terminated_jobs(), state} end)
+    exit_info = Enum.find(terminated_jobs, &(&1.id == child_id))
+    refute is_nil(exit_info)
+    assert exit_info.reason == :timeout
+  end
+
   defp verify_command({:stop_job, shutdown_type}, pid) do
     children = record_child_change(pid, nil, fn -> nil end).after.children
 
@@ -132,6 +159,7 @@ defmodule Parent.GenServerTest do
       :test_cast,
       :test_send,
       :start_job,
+      :start_timeout_job,
       {:stop_job, shutdown_type()},
       :shutdown_all,
       :update_meta

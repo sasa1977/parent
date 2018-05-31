@@ -7,7 +7,8 @@ defmodule Parent.PublicTypes do
               :id => id,
               :start => start,
               optional(:meta) => child_meta,
-              optional(:shutdown) => shutdown
+              optional(:shutdown) => shutdown,
+              optional(:timeout) => pos_integer | :infinity
             }
 
       @type id :: term

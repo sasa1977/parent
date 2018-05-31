@@ -30,6 +30,25 @@ defmodule Parent.FunctionalTest do
     refute Process.alive?(normal_pid)
   end
 
+  test "child timeout" do
+    state = Functional.initialize()
+
+    timeout_child = %{
+      id: :timeout_child,
+      start: fn -> Agent.start_link(fn -> :ok end) end,
+      timeout: 10,
+      meta: :timeout_meta
+    }
+
+    {:ok, timeout_pid, state} = Functional.start_child(state, timeout_child)
+
+    assert_receive {Parent.Functional, _, _} = message
+    assert {exit_response, state} = Functional.handle_message(state, message)
+    assert exit_response == {:EXIT, timeout_pid, :timeout_child, :timeout_meta, :timeout}
+    assert Functional.size(state) == 0
+    refute Process.alive?(timeout_pid)
+  end
+
   property "started processes are registered" do
     check all child_specs <- child_specs(successful_child_spec()) do
       initial_data = %{state: Functional.initialize(), children: []}

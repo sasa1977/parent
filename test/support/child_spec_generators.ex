@@ -24,6 +24,7 @@ defmodule Parent.ChildSpecGenerators do
           id: constant(&1),
           start: successful_start(),
           shutdown: shutdown(),
+          timeout: timeout(),
           meta: small_term()
         }),
         constant({__MODULE__, &1}),
@@ -68,14 +69,8 @@ defmodule Parent.ChildSpecGenerators do
     ])
   end
 
-  defp shutdown() do
-    one_of([
-      integer(0..5000),
-      :brutal_kill,
-      :infinity
-    ])
-  end
-
+  defp shutdown(), do: one_of([integer(0..5000), :brutal_kill, :infinity])
+  defp timeout(), do: one_of([integer(1000..5000), :infinity])
   defp small_term(), do: StreamData.scale(term(), fn _size -> 2 end)
 
   @doc false

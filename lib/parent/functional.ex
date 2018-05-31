@@ -4,7 +4,7 @@ defmodule Parent.Functional do
   use Parent.PublicTypes
 
   @opaque t :: %{registry: Registry.t()}
-  @type on_handle_message :: {{:EXIT, pid, id, term}, t} | :error
+  @type on_handle_message :: {{:EXIT, pid, id, term}, t} | :error | :ignore
 
   @spec initialize() :: t
   def initialize() do
@@ -48,7 +48,18 @@ defmodule Parent.Functional do
     full_child_spec = expand_child_spec(child_spec)
 
     with {:ok, pid} <- start_child_process(full_child_spec.start) do
-      data = %{shutdown: full_child_spec.shutdown, meta: full_child_spec.meta}
+      timer_ref =
+        case full_child_spec.timeout do
+          :infinity -> nil
+          timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
+        end
+
+      data = %{
+        shutdown: full_child_spec.shutdown,
+        meta: full_child_spec.meta,
+        timer_ref: timer_ref
+      }
+
       {:ok, pid, update_in(state.registry, &Registry.register(&1, full_child_spec.id, pid, data))}
     end
   end
@@ -78,7 +89,8 @@ defmodule Parent.Functional do
             end
         end
 
-        {:ok, _id, _data, registry} = Registry.pop(state.registry, pid)
+        {:ok, _id, data, registry} = Registry.pop(state.registry, pid)
+        kill_timer(data.timer_ref, pid)
         %{state | registry: registry}
     end
   end
@@ -86,7 +98,26 @@ defmodule Parent.Functional do
   @spec handle_message(t, term) :: on_handle_message
   def handle_message(state, {:EXIT, pid, reason}) do
     with {:ok, id, data, registry} <- Registry.pop(state.registry, pid) do
+      kill_timer(data.timer_ref, pid)
       {{:EXIT, pid, id, data.meta, reason}, %{state | registry: registry}}
+    end
+  end
+
+  def handle_message(state, {__MODULE__, :child_timeout, pid}) do
+    case Registry.pop(state.registry, pid) do
+      {:ok, id, data, registry} ->
+        Process.exit(pid, :kill)
+
+        receive do
+          {:EXIT, ^pid, _reason} -> :ok
+        end
+
+        {{:EXIT, pid, id, data.meta, :timeout}, %{state | registry: registry}}
+
+      :error ->
+        # The timeout has occurred, just after the child terminated. Since this
+        # is still an internal message, we'll just ignore it.
+        :ignore
     end
   end
 
@@ -113,6 +144,9 @@ defmodule Parent.Functional do
       state.registry
       |> Registry.entries()
       |> Enum.sort_by(fn {_pid, process} -> process.data.shutdown end)
+
+    # Kill all timeout timers first, because we don't want timeout to interfere with the shutdown logic.
+    Enum.each(pids_and_specs, fn {pid, process} -> kill_timer(process.data.timer_ref, pid) end)
 
     Enum.each(pids_and_specs, &stop_process(&1, reason))
     await_terminated_children(state, pids_and_specs, :erlang.monotonic_time(:millisecond))
@@ -149,7 +183,7 @@ defmodule Parent.Functional do
   defp shutdown_reason(:normal), do: :shutdown
   defp shutdown_reason(other), do: other
 
-  @default_spec %{shutdown: :timer.seconds(5), meta: nil}
+  @default_spec %{shutdown: :timer.seconds(5), meta: nil, timeout: :infinity}
 
   defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, nil})
   defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
@@ -158,4 +192,16 @@ defmodule Parent.Functional do
 
   defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
   defp start_child_process(fun) when is_function(fun, 0), do: fun.()
+
+  defp kill_timer(nil, _pid), do: :ok
+
+  defp kill_timer(timer_ref, pid) do
+    Process.cancel_timer(timer_ref)
+
+    receive do
+      {__MODULE__, :child_timeout, ^pid} -> :ok
+    after
+      0 -> :ok
+    end
+  end
 end

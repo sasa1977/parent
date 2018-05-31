@@ -66,6 +66,8 @@ defmodule Parent.GenServer do
     - `:start` (required) - an MFA, or a zero arity lambda invoked to start the child
     - `:meta` (optional) - a term associated with the started child, defaults to `nil`
     - `:shutdown` (optional) - same as with `Supervisor`, defaults to 5000
+    - `:timeout` (optional) - timeout after which the child is killed by the parent,
+      see the timeout section below, defaults to `:infinity`
 
   The function described with `:start` needs to start a linked process and return
   the result as `{:ok, pid}`. For example:
@@ -105,6 +107,12 @@ defmodule Parent.GenServer do
   ```
 
   The return value of `handle_child_terminated` is the same as for `handle_info`.
+
+  ## Timeout
+
+  If a positive integer is provided via the `:timeout` option, the parent will
+  terminate the child if it doesn't stop within the given time. In this case,
+  `handle_child_terminated/5` will be invoked with the exit reason `:timeout`.
 
   ## Working with children
 
@@ -203,6 +211,9 @@ defmodule Parent.GenServer do
   @impl GenServer
   def handle_info(message, state) do
     case Parent.Procdict.handle_message(message) do
+      :ignore ->
+        {:noreply, state}
+
       {:EXIT, pid, id, meta, reason} ->
         invoke_callback(:handle_child_terminated, [id, meta, pid, reason, state])
 
