@@ -12,7 +12,8 @@ defmodule Parent.MixProject do
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
       dialyzer: [plt_add_deps: :transitive],
-      docs: docs()
+      docs: docs(),
+      package: package()
     ]
   end
 
@@ -39,6 +40,18 @@ defmodule Parent.MixProject do
       main: "Parent.GenServer",
       source_url: "https://github.com/sasa1977/parent/",
       source_ref: @version
+    ]
+  end
+
+  defp package() do
+    [
+      description: "Custom parenting of processes.",
+      maintainers: ["Saša Jurić"],
+      licenses: ["MIT"],
+      links: %{
+        "Github" => "https://github.com/sasa1977/parent",
+        "Docs" => "http://hexdocs.pm/parent"
+      }
     ]
   end
 end
