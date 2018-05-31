@@ -1,7 +1,7 @@
 defmodule Parent.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.1.1"
 
   def project do
     [
@@ -50,7 +50,11 @@ defmodule Parent.MixProject do
       licenses: ["MIT"],
       links: %{
         "Github" => "https://github.com/sasa1977/parent",
-        "Docs" => "http://hexdocs.pm/parent"
+        "Docs" => "http://hexdocs.pm/parent",
+        "Changelog" =>
+          "https://github.com/sasa1977/parent/blob/#{@version}/CHANGELOG.md##{
+            String.replace(@version, ".", "")
+          }"
       }
     ]
   end
