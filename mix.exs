@@ -50,7 +50,6 @@ defmodule Parent.MixProject do
       licenses: ["MIT"],
       links: %{
         "Github" => "https://github.com/sasa1977/parent",
-        "Docs" => "http://hexdocs.pm/parent",
         "Changelog" =>
           "https://github.com/sasa1977/parent/blob/#{@version}/CHANGELOG.md##{
             String.replace(@version, ".", "")
