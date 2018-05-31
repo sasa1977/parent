@@ -4,6 +4,32 @@ defmodule Parent.FunctionalTest do
   alias Parent.Functional
   import Parent.ChildSpecGenerators
 
+  test "shutting down a child which refuses to stop" do
+    state = Functional.initialize()
+
+    stubborn_child = %{
+      id: :stubborn_child,
+      start: fn ->
+        Task.start_link(fn ->
+          Process.flag(:trap_exit, true)
+          Process.sleep(:infinity)
+        end)
+      end,
+      shutdown: 100
+    }
+
+    normal_child = %{id: :normal_child, start: fn -> Agent.start_link(fn -> :ok end) end}
+
+    {:ok, stubborn_pid, state} = Functional.start_child(state, stubborn_child)
+    {:ok, normal_pid, state} = Functional.start_child(state, normal_child)
+
+    state = Functional.shutdown_all(state, :shutdown)
+
+    assert Functional.size(state) == 0
+    refute Process.alive?(stubborn_pid)
+    refute Process.alive?(normal_pid)
+  end
+
   property "started processes are registered" do
     check all child_specs <- child_specs(successful_child_spec()) do
       initial_data = %{state: Functional.initialize(), children: []}
