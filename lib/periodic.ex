@@ -85,10 +85,10 @@ defmodule Periodic do
 
   job_id=my_job [debug] starting the job
   job_id=my_job [debug] previous job still running, not starting another instance
-  job_id=my_job [debug] job timeout
+  job_id=my_job [debug] job failed with the reason `:timeout`
   job_id=my_job [debug] starting the job
   job_id=my_job [debug] previous job still running, not starting another instance
-  job_id=my_job [debug] job timeout
+  job_id=my_job [debug] job failed with the reason `:timeout`
   ...
   ```
 
@@ -109,7 +109,7 @@ defmodule Periodic do
           log_level: nil | Logger.level(),
           log_meta: Keyword.t()
         ]
-  @type duration :: non_neg_integer | :infinity
+  @type duration :: pos_integer | :infinity
   @type job_spec :: (() -> term) | {module, atom, [term]}
 
   @doc "Starts the periodic executor."
@@ -138,28 +138,12 @@ defmodule Periodic do
     {:noreply, state}
   end
 
-  def handle_info({:timeout, job_id}, state) do
-    Parent.GenServer.shutdown_child(job_id)
-    log(state, "job timeout")
-    {:noreply, state}
-  end
-
-  def handle_info(unknown_message, state), do: super(unknown_message, state)
-
   @impl Parent.GenServer
-  def handle_child_terminated(id, timer, _pid, _reason, state) do
-    if timer != nil do
-      Process.cancel_timer(timer)
-
-      # flush the message if it's already in the mailbox
-      receive do
-        {:timeout, ^id} -> :ok
-      after
-        0 -> :ok
-      end
+  def handle_child_terminated(_id, _meta, _pid, reason, state) do
+    case reason do
+      :normal -> log(state, "job finished")
+      _other -> log(state, "job failed with the reason `#{inspect(reason)}`")
     end
-
-    log(state, "job finished")
 
     {:noreply, state}
   end
@@ -181,15 +165,10 @@ defmodule Periodic do
     id = if state.overlap?, do: make_ref(), else: :job
     job = state.run
 
-    timer =
-      if state.timeout != :infinity,
-        do: Process.send_after(self(), {:timeout, id}, state.timeout),
-        else: nil
-
     Parent.GenServer.start_child(%{
       id: id,
       start: {Task, :start_link, [fn -> invoke_job(job) end]},
-      meta: timer,
+      timeout: state.timeout,
       shutdown: :brutal_kill
     })
   end
