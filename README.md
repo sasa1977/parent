@@ -1,6 +1,9 @@
 # Parent
 
-Support for custom parenting of processes. See [rationale](./RATIONALE.md) for detailed explanation.
+[![hex.pm](https://img.shields.io/hexpm/v/parent.svg?style=flat-square)](https://hex.pm/packages/parent)
+[![hexdocs.pm](https://img.shields.io/badge/docs-latest-green.svg?style=flat-square)](https://hexdocs.pm/parent/)
+
+Support for custom parenting of processes. See [rationale](./RATIONALE.md) for detailed explanation, and [docs](https://hexdocs.pm/parent/) for reference.
 
 ## Example
 
