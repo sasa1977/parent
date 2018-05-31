@@ -1,15 +1,18 @@
 defmodule Parent.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+
   def project do
     [
       app: :parent,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.6",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
-      dialyzer: [plt_add_deps: :transitive]
+      dialyzer: [plt_add_deps: :transitive],
+      docs: docs()
     ]
   end
 
@@ -29,4 +32,13 @@ defmodule Parent.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  defp docs() do
+    [
+      extras: ["RATIONALE.md"],
+      main: "Parent.GenServer",
+      source_url: "https://github.com/sasa1977/parent/",
+      source_ref: @version
+    ]
+  end
 end
