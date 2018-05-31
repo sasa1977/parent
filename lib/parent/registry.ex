@@ -2,8 +2,8 @@ defmodule Parent.Registry do
   @moduledoc false
   use Parent.PublicTypes
 
-  @opaque t :: %{id_to_pid: %{id => pid}, processes: %{pid => entries}}
-  @type entries :: %{id: id, data: data}
+  @opaque t :: %{id_to_pid: %{id => pid}, processes: entries}
+  @type entries :: %{pid => %{id: id, data: data}}
   @type data :: map
 
   @spec new() :: t
