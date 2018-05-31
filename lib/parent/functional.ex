@@ -96,8 +96,13 @@ defmodule Parent.Functional do
   def shutdown_all(state, reason) do
     state = terminate_all_children(state, shutdown_reason(reason))
 
+    # The registry now contains only children which refused to die. These
+    # children are already forcefully terminated, so now we just have to
+    # wait for the :EXIT message.
     Enum.each(Registry.entries(state.registry), fn {pid, _data} ->
-      await_child_termination(pid)
+      receive do
+        {:EXIT, ^pid, _reason} -> :ok
+      end
     end)
 
     %{state | registry: Registry.new()}
@@ -126,8 +131,12 @@ defmodule Parent.Functional do
         await_terminated_children(state, other, start_time)
     after
       wait_time(process.data.shutdown, start_time) ->
+        # Brutally killing the child which refuses to stop, but we won't wait
+        # for the exit signal now. We'll focus on other children first, and
+        # then wait for the ones we had to forcefully kill in the next pass.
+
         Process.exit(pid, :kill)
-        await_terminated_children(state, other, 0)
+        await_terminated_children(state, other, start_time)
     end
   end
 
@@ -139,12 +148,6 @@ defmodule Parent.Functional do
 
   defp shutdown_reason(:normal), do: :shutdown
   defp shutdown_reason(other), do: other
-
-  defp await_child_termination(pid) do
-    receive do
-      {:EXIT, ^pid, _reason} -> :ok
-    end
-  end
 
   @default_spec %{shutdown: :timer.seconds(5), meta: nil}
 
