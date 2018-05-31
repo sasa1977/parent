@@ -41,7 +41,7 @@ defmodule Parent.GenServer do
     GenServer.start_link(__MODULE__, {module, arg}, options)
   end
 
-  @spec start_child(in_child_spec) :: on_start_child
+  @spec start_child(child_spec | module | {module, term}) :: on_start_child
   defdelegate start_child(child_spec), to: Parent.Procdict
 
   @spec shutdown_child(name) :: :ok

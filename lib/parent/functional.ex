@@ -43,7 +43,7 @@ defmodule Parent.Functional do
          do: {:ok, %{state | registry: updated_registry}}
   end
 
-  @spec start_child(t, in_child_spec) :: {:ok, pid, t} | term
+  @spec start_child(t, child_spec | module | {module, term}) :: {:ok, pid, t} | term
   def start_child(state, child_spec) do
     full_child_spec = expand_child_spec(child_spec)
 

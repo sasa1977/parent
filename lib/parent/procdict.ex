@@ -13,7 +13,7 @@ defmodule Parent.Procdict do
   @spec initialized?() :: boolean
   def initialized?(), do: not is_nil(Process.get(__MODULE__))
 
-  @spec start_child(in_child_spec) :: on_start_child
+  @spec start_child(child_spec | module | {module, term}) :: on_start_child
   def start_child(child_spec) do
     with result <- Functional.start_child(state(), child_spec),
          {:ok, pid, state} <- result do
