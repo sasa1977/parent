@@ -32,18 +32,18 @@ defmodule Parent.GenServerTest do
   end
 
   defp verify_command(:start_job, pid) do
-    child_name = make_ref()
+    child_id = make_ref()
 
     change =
-      record_child_change(pid, child_name, fn ->
-        meta = {child_name, :meta}
-        child_spec = %{id: child_name, start: {Agent, :start_link, [fn -> nil end]}, meta: meta}
+      record_child_change(pid, child_id, fn ->
+        meta = {child_id, :meta}
+        child_spec = %{id: child_id, start: {Agent, :start_link, [fn -> nil end]}, meta: meta}
 
         res = Parent.GenServer.start_child(child_spec)
         assert {:ok, pid} = res
-        assert Parent.GenServer.child_name(pid) == {:ok, child_name}
-        assert Parent.GenServer.child_pid(child_name) == {:ok, pid}
-        assert Parent.GenServer.child_meta(child_name) == {:ok, meta}
+        assert Parent.GenServer.child_id(pid) == {:ok, child_id}
+        assert Parent.GenServer.child_pid(child_id) == {:ok, pid}
+        assert Parent.GenServer.child_meta(child_id) == {:ok, meta}
         res
       end)
 
@@ -52,21 +52,21 @@ defmodule Parent.GenServerTest do
     assert change.after.child_pid == {:ok, child_pid}
     assert change.after.num_children == change.before.num_children + 1
 
-    child = Enum.find(change.after.children, fn {_name, pid, _meta} -> pid == child_pid end)
-    assert {^child_name, ^child_pid, {^child_name, :meta}} = child
+    child = Enum.find(change.after.children, fn {_id, pid, _meta} -> pid == child_pid end)
+    assert {^child_id, ^child_pid, {^child_id, :meta}} = child
   end
 
   defp verify_command({:stop_job, shutdown_type}, pid) do
     children = record_child_change(pid, nil, fn -> nil end).after.children
 
     if Enum.count(children) > 0 do
-      [{child_name, child_pid, meta}] = Enum.take(children, 1)
+      [{child_id, child_pid, meta}] = Enum.take(children, 1)
 
       mref = Process.monitor(child_pid)
 
       change =
-        record_child_change(pid, child_name, fn ->
-          stop_child(pid, child_pid, child_name, shutdown_type)
+        record_child_change(pid, child_id, fn ->
+          stop_child(pid, child_pid, child_id, shutdown_type)
         end)
 
       assert_receive {:DOWN, ^mref, :process, ^child_pid, _reason}
@@ -74,14 +74,14 @@ defmodule Parent.GenServerTest do
       change =
         Map.merge(
           change,
-          record_child_change(pid, child_name, fn -> nil end) |> Map.take([:after])
+          record_child_change(pid, child_id, fn -> nil end) |> Map.take([:after])
         )
 
       refute Process.alive?(child_pid)
       assert change.after.child? == false
       assert change.after.num_children == change.before.num_children - 1
       assert change.after.child_pid == :error
-      child = Enum.find(change.after.children, fn {_name, pid, _meta} -> pid == child_pid end)
+      child = Enum.find(change.after.children, fn {_id, pid, _meta} -> pid == child_pid end)
       assert child == nil
 
       terminated_info = Enum.find(change.after.terminated_jobs, &(&1.pid == child_pid))
@@ -92,7 +92,7 @@ defmodule Parent.GenServerTest do
         expected_reason = if shutdown_type == :kill, do: :killed, else: shutdown_type
 
         assert terminated_info == %{
-                 name: child_name,
+                 id: child_id,
                  meta: meta,
                  pid: child_pid,
                  reason: expected_reason
@@ -108,19 +108,19 @@ defmodule Parent.GenServerTest do
       end)
 
     assert change.after.num_children == 0
-    Enum.each(change.before.children, fn {_name, pid, _meta} -> refute Process.alive?(pid) end)
+    Enum.each(change.before.children, fn {_id, pid, _meta} -> refute Process.alive?(pid) end)
   end
 
   defp verify_command(:update_meta, pid) do
     children = record_child_change(pid, nil, fn -> nil end).after.children
 
     if Enum.count(children) > 0 do
-      [{child_name, _child_pid, meta}] = Enum.take(children, 1)
+      [{child_id, _child_pid, meta}] = Enum.take(children, 1)
 
       TestServer.call(pid, fn state ->
         meta_updater = &{:updated, &1}
-        assert :ok = Parent.GenServer.update_child_meta(child_name, meta_updater)
-        assert Parent.GenServer.child_meta(child_name) == {:ok, meta_updater.(meta)}
+        assert :ok = Parent.GenServer.update_child_meta(child_id, meta_updater)
+        assert Parent.GenServer.child_meta(child_id) == {:ok, meta_updater.(meta)}
         {:ok, state}
       end)
     end
@@ -143,25 +143,24 @@ defmodule Parent.GenServerTest do
 
   defp shutdown_type(), do: one_of([:normal, :shutdown, :crash, :kill])
 
-  defp stop_child(_parent_pid, child_pid, _child_name, :normal), do: Agent.stop(child_pid)
+  defp stop_child(_parent_pid, child_pid, _child_id, :normal), do: Agent.stop(child_pid)
 
-  defp stop_child(_parent_pid, child_pid, _child_name, :crash),
-    do: Process.exit(child_pid, :crash)
+  defp stop_child(_parent_pid, child_pid, _child_id, :crash), do: Process.exit(child_pid, :crash)
 
-  defp stop_child(_parent_pid, child_pid, _child_name, :kill), do: Process.exit(child_pid, :kill)
+  defp stop_child(_parent_pid, child_pid, _child_id, :kill), do: Process.exit(child_pid, :kill)
 
-  defp stop_child(parent_pid, _child_pid, child_name, :shutdown) do
+  defp stop_child(parent_pid, _child_pid, child_id, :shutdown) do
     TestServer.cast(parent_pid, fn state ->
-      Parent.GenServer.shutdown_child(child_name)
+      Parent.GenServer.shutdown_child(child_id)
       state
     end)
   end
 
-  defp record_child_change(pid, child_name, fun) do
+  defp record_child_change(pid, child_id, fun) do
     TestServer.call(pid, fn state ->
-      before_info = parent_info(child_name)
+      before_info = parent_info(child_id)
       result = fun.()
-      after_info = parent_info(child_name)
+      after_info = parent_info(child_id)
 
       response = %{
         before: before_info,
@@ -173,13 +172,13 @@ defmodule Parent.GenServerTest do
     end)
   end
 
-  defp parent_info(child_name) do
+  defp parent_info(child_id) do
     %{
       children: Parent.GenServer.children(),
       terminated_jobs: TestServer.terminated_jobs(),
       num_children: Parent.GenServer.num_children(),
-      child_pid: Parent.GenServer.child_pid(child_name),
-      child?: Parent.GenServer.child?(child_name)
+      child_pid: Parent.GenServer.child_pid(child_id),
+      child?: Parent.GenServer.child?(child_id)
     }
   end
 end

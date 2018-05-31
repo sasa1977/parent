@@ -16,7 +16,7 @@ defmodule Parent.FunctionalTest do
       data = Enum.reduce(child_specs, initial_data, reducer)
 
       for child <- data.children do
-        assert Functional.name(data.state, child.pid) == {:ok, id(child.spec)}
+        assert Functional.id(data.state, child.pid) == {:ok, id(child.spec)}
         assert {:ok, meta} = Functional.meta(data.state, id(child.spec))
         assert meta == meta(child.spec)
       end
@@ -47,15 +47,15 @@ defmodule Parent.FunctionalTest do
         Agent.stop(pid, :shutdown)
         assert_receive {:EXIT, ^pid, reason} = message
 
-        assert {{:EXIT, ^pid, name, meta, ^reason}, new_state} =
+        assert {{:EXIT, ^pid, id, meta, ^reason}, new_state} =
                  Functional.handle_message(state, message)
 
-        assert name == id(child_spec)
+        assert id == id(child_spec)
         assert meta == meta(child_spec)
 
         assert Functional.size(new_state) == Functional.size(state) - 1
         assert Functional.pid(new_state, id(child_spec)) == :error
-        assert Functional.name(new_state, pid) == :error
+        assert Functional.id(new_state, pid) == :error
         assert Functional.meta(new_state, id(child_spec)) == :error
 
         new_state
@@ -86,7 +86,7 @@ defmodule Parent.FunctionalTest do
 
         assert Functional.size(new_state) == Functional.size(state) - 1
         assert Functional.pid(new_state, id(child_spec)) == :error
-        assert Functional.name(new_state, pid) == :error
+        assert Functional.id(new_state, pid) == :error
         assert Functional.meta(new_state, id(child_spec)) == :error
 
         new_state

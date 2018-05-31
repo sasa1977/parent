@@ -4,7 +4,7 @@ defmodule Parent.GenServer do
 
   @type state :: term
 
-  @callback handle_child_terminated(name, child_meta, pid, reason :: term, state) ::
+  @callback handle_child_terminated(id, child_meta, pid, reason :: term, state) ::
               {:noreply, new_state}
               | {:noreply, new_state, timeout | :hibernate}
               | {:stop, reason :: term, new_state}
@@ -30,7 +30,7 @@ defmodule Parent.GenServer do
       end
 
       @impl behaviour
-      def handle_child_terminated(_name, _meta, _pid, _reason, state), do: {:noreply, state}
+      def handle_child_terminated(_id, _meta, _pid, _reason, state), do: {:noreply, state}
 
       defoverridable handle_child_terminated: 5, child_spec: 1
     end
@@ -44,8 +44,8 @@ defmodule Parent.GenServer do
   @spec start_child(child_spec | module | {module, term}) :: on_start_child
   defdelegate start_child(child_spec), to: Parent.Procdict
 
-  @spec shutdown_child(name) :: :ok
-  defdelegate shutdown_child(child_name), to: Parent.Procdict
+  @spec shutdown_child(id) :: :ok
+  defdelegate shutdown_child(child_id), to: Parent.Procdict
 
   @spec children :: [child]
   defdelegate children(), to: Parent.Procdict, as: :entries
@@ -53,23 +53,23 @@ defmodule Parent.GenServer do
   @spec num_children() :: non_neg_integer
   defdelegate num_children(), to: Parent.Procdict, as: :size
 
-  @spec child_name(pid) :: {:ok, name} | :error
-  defdelegate child_name(pid), to: Parent.Procdict, as: :name
+  @spec child_id(pid) :: {:ok, id} | :error
+  defdelegate child_id(pid), to: Parent.Procdict, as: :id
 
-  @spec child_pid(name) :: {:ok, pid} | :error
-  defdelegate child_pid(name), to: Parent.Procdict, as: :pid
+  @spec child_pid(id) :: {:ok, pid} | :error
+  defdelegate child_pid(id), to: Parent.Procdict, as: :pid
 
-  @spec child_meta(name) :: {:ok, child_meta} | :error
-  defdelegate child_meta(name), to: Parent.Procdict, as: :meta
+  @spec child_meta(id) :: {:ok, child_meta} | :error
+  defdelegate child_meta(id), to: Parent.Procdict, as: :meta
 
-  @spec update_child_meta(name, (child_meta -> child_meta)) :: :ok | :error
-  defdelegate update_child_meta(name, updater), to: Parent.Procdict, as: :update_meta
+  @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
+  defdelegate update_child_meta(id, updater), to: Parent.Procdict, as: :update_meta
 
   @spec shutdown_all(reason :: term) :: :ok
   defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
 
-  @spec child?(name) :: boolean
-  def child?(name), do: match?({:ok, _}, child_pid(name))
+  @spec child?(id) :: boolean
+  def child?(id), do: match?({:ok, _}, child_pid(id))
 
   @impl GenServer
   def init({callback, arg}) do
@@ -81,8 +81,8 @@ defmodule Parent.GenServer do
   @impl GenServer
   def handle_info(message, state) do
     case Parent.Procdict.handle_message(message) do
-      {:EXIT, pid, name, meta, reason} ->
-        invoke_callback(:handle_child_terminated, [name, meta, pid, reason, state])
+      {:EXIT, pid, id, meta, reason} ->
+        invoke_callback(:handle_child_terminated, [id, meta, pid, reason, state])
 
       :error ->
         invoke_callback(:handle_info, [message, state])

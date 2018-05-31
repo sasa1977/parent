@@ -22,9 +22,9 @@ defmodule Parent.Procdict do
     end
   end
 
-  @spec shutdown_child(name) :: :ok
-  def shutdown_child(child_name) do
-    state = Functional.shutdown_child(state(), child_name)
+  @spec shutdown_child(id) :: :ok
+  def shutdown_child(child_id) do
+    state = Functional.shutdown_child(state(), child_id)
     store(state)
     :ok
   end
@@ -50,18 +50,18 @@ defmodule Parent.Procdict do
   @spec size() :: non_neg_integer
   def size(), do: Functional.size(state())
 
-  @spec name(pid) :: {:ok, name} | :error
-  def name(pid), do: Functional.name(state(), pid)
+  @spec id(pid) :: {:ok, id} | :error
+  def id(pid), do: Functional.id(state(), pid)
 
-  @spec pid(name) :: {:ok, pid} | :error
-  def pid(name), do: Functional.pid(state(), name)
+  @spec pid(id) :: {:ok, pid} | :error
+  def pid(id), do: Functional.pid(state(), id)
 
-  @spec meta(name) :: {:ok, child_meta} | :error
-  def meta(name), do: Functional.meta(state(), name)
+  @spec meta(id) :: {:ok, child_meta} | :error
+  def meta(id), do: Functional.meta(state(), id)
 
-  @spec update_meta(name, (child_meta -> child_meta)) :: :ok | :error
-  def update_meta(name, updater) do
-    with {:ok, new_state} <- Functional.update_meta(state(), name, updater) do
+  @spec update_meta(id, (child_meta -> child_meta)) :: :ok | :error
+  def update_meta(id, updater) do
+    with {:ok, new_state} <- Functional.update_meta(state(), id, updater) do
       store(new_state)
       :ok
     end

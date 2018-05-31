@@ -4,7 +4,7 @@ defmodule Parent.Functional do
   use Parent.PublicTypes
 
   @opaque t :: %{registry: Registry.t()}
-  @type on_handle_message :: {{:EXIT, pid, name, term}, t} | :error
+  @type on_handle_message :: {{:EXIT, pid, id, term}, t} | :error
 
   @spec initialize() :: t
   def initialize() do
@@ -16,28 +16,28 @@ defmodule Parent.Functional do
   def entries(state) do
     state.registry
     |> Registry.entries()
-    |> Enum.map(fn {pid, process} -> {process.name, pid, process.data.meta} end)
+    |> Enum.map(fn {pid, process} -> {process.id, pid, process.data.meta} end)
   end
 
   @spec size(t) :: non_neg_integer
   def size(state), do: Registry.size(state.registry)
 
-  @spec name(t, pid) :: {:ok, name} | :error
-  def name(state, pid), do: Registry.name(state.registry, pid)
+  @spec id(t, pid) :: {:ok, id} | :error
+  def id(state, pid), do: Registry.id(state.registry, pid)
 
-  @spec pid(t, name) :: {:ok, pid} | :error
-  def pid(state, name), do: Registry.pid(state.registry, name)
+  @spec pid(t, id) :: {:ok, pid} | :error
+  def pid(state, id), do: Registry.pid(state.registry, id)
 
-  @spec meta(t, name) :: {:ok, child_meta} | :error
-  def meta(state, name) do
-    with {:ok, pid} <- Registry.pid(state.registry, name),
+  @spec meta(t, id) :: {:ok, child_meta} | :error
+  def meta(state, id) do
+    with {:ok, pid} <- Registry.pid(state.registry, id),
          {:ok, data} <- Registry.data(state.registry, pid),
          do: {:ok, data.meta}
   end
 
-  @spec update_meta(t, name, (child_meta -> child_meta)) :: {:ok, t} | :error
-  def update_meta(state, name, updater) do
-    with {:ok, pid} <- Registry.pid(state.registry, name),
+  @spec update_meta(t, id, (child_meta -> child_meta)) :: {:ok, t} | :error
+  def update_meta(state, id, updater) do
+    with {:ok, pid} <- Registry.pid(state.registry, id),
          {:ok, updated_registry} <-
            Registry.update(state.registry, pid, &update_in(&1.meta, updater)),
          do: {:ok, %{state | registry: updated_registry}}
@@ -53,9 +53,9 @@ defmodule Parent.Functional do
     end
   end
 
-  @spec shutdown_child(t, name) :: t
-  def shutdown_child(state, child_name) do
-    case Registry.pid(state.registry, child_name) do
+  @spec shutdown_child(t, id) :: t
+  def shutdown_child(state, child_id) do
+    case Registry.pid(state.registry, child_id) do
       :error ->
         raise "trying to terminate an unknown child"
 
@@ -78,15 +78,15 @@ defmodule Parent.Functional do
             end
         end
 
-        {:ok, _name, _data, registry} = Registry.pop(state.registry, pid)
+        {:ok, _id, _data, registry} = Registry.pop(state.registry, pid)
         %{state | registry: registry}
     end
   end
 
   @spec handle_message(t, term) :: on_handle_message
   def handle_message(state, {:EXIT, pid, reason}) do
-    with {:ok, name, data, registry} <- Registry.pop(state.registry, pid) do
-      {{:EXIT, pid, name, data.meta, reason}, %{state | registry: registry}}
+    with {:ok, id, data, registry} <- Registry.pop(state.registry, pid) do
+      {{:EXIT, pid, id, data.meta, reason}, %{state | registry: registry}}
     end
   end
 
@@ -121,7 +121,7 @@ defmodule Parent.Functional do
   defp await_terminated_children(state, [{pid, process} | other], start_time) do
     receive do
       {:EXIT, ^pid, _reason} ->
-        {:ok, _name, _data, registry} = Registry.pop(state.registry, pid)
+        {:ok, _id, _data, registry} = Registry.pop(state.registry, pid)
         state = %{state | registry: registry}
         await_terminated_children(state, other, start_time)
     after

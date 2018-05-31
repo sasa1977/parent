@@ -147,13 +147,13 @@ defmodule Periodic do
   def handle_info(unknown_message, state), do: super(unknown_message, state)
 
   @impl Parent.GenServer
-  def handle_child_terminated(name, timer, _pid, _reason, state) do
+  def handle_child_terminated(id, timer, _pid, _reason, state) do
     if timer != nil do
       Process.cancel_timer(timer)
 
       # flush the message if it's already in the mailbox
       receive do
-        {:timeout, ^name} -> :ok
+        {:timeout, ^id} -> :ok
       after
         0 -> :ok
       end

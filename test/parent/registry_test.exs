@@ -13,9 +13,9 @@ defmodule Parent.RegistryTest do
   property "registered entries are properly mapped" do
     check all registrations <- unique_registrations() do
       registry = register_all(registrations)
-      Enum.each(registrations, &assert(Registry.name(registry, &1.pid) == {:ok, &1.name}))
+      Enum.each(registrations, &assert(Registry.id(registry, &1.pid) == {:ok, &1.id}))
       Enum.each(registrations, &assert(Registry.data(registry, &1.pid) == {:ok, &1.data}))
-      Enum.each(registrations, &assert(Registry.pid(registry, &1.name) == {:ok, &1.pid}))
+      Enum.each(registrations, &assert(Registry.pid(registry, &1.id) == {:ok, &1.pid}))
     end
   end
 
@@ -24,18 +24,18 @@ defmodule Parent.RegistryTest do
       registry = register_all(registrations)
 
       assert Enum.sort(Registry.entries(registry)) ==
-               Enum.sort(Enum.map(registrations, &{&1.pid, %{name: &1.name, data: &1.data}}))
+               Enum.sort(Enum.map(registrations, &{&1.pid, %{id: &1.id, data: &1.data}}))
     end
   end
 
-  property "duplicate names are not allowed" do
+  property "duplicate ids are not allowed" do
     check all registrations <- unique_registrations() do
       registry = register_all(registrations)
 
       Enum.each(
         registrations,
         &assert_raise(RuntimeError, fn ->
-          Registry.register(registry, &1.name, make_ref(), &1.data)
+          Registry.register(registry, &1.id, make_ref(), &1.data)
         end)
       )
     end
@@ -48,7 +48,7 @@ defmodule Parent.RegistryTest do
       Enum.each(
         registrations,
         &assert_raise(RuntimeError, fn ->
-          Registry.register(registry, make_ref(), &1.pid, &1.name)
+          Registry.register(registry, make_ref(), &1.pid, &1.id)
         end)
       )
     end
@@ -57,8 +57,8 @@ defmodule Parent.RegistryTest do
   property "pop" do
     check all unregs <- picks() do
       reducer = fn child, registry ->
-        assert {:ok, name, data, registry} = Registry.pop(registry, child.pid)
-        assert name == child.name
+        assert {:ok, id, data, registry} = Registry.pop(registry, child.pid)
+        assert id == child.id
         assert data == child.data
         registry
       end
@@ -69,13 +69,13 @@ defmodule Parent.RegistryTest do
 
       assert Registry.size(registry) == length(survived_data)
 
-      Enum.each(unregs.picks, &assert(Registry.name(registry, &1.pid) == :error))
+      Enum.each(unregs.picks, &assert(Registry.id(registry, &1.pid) == :error))
       Enum.each(unregs.picks, &assert(Registry.data(registry, &1.pid) == :error))
-      Enum.each(unregs.picks, &assert(Registry.pid(registry, &1.name) == :error))
+      Enum.each(unregs.picks, &assert(Registry.pid(registry, &1.id) == :error))
 
-      Enum.each(survived_data, &assert(Registry.name(registry, &1.pid) != :error))
+      Enum.each(survived_data, &assert(Registry.id(registry, &1.pid) != :error))
       Enum.each(survived_data, &assert(Registry.data(registry, &1.pid) != :error))
-      Enum.each(survived_data, &assert(Registry.pid(registry, &1.name) != :error))
+      Enum.each(survived_data, &assert(Registry.pid(registry, &1.id) != :error))
     end
   end
 
@@ -98,9 +98,9 @@ defmodule Parent.RegistryTest do
   defp unique_registrations() do
     bind(nonempty(list_of({small_term(), integer(), small_term()})), fn registrations ->
       registrations
-      |> Stream.uniq_by(fn {name, _pid, _data} -> name end)
-      |> Stream.uniq_by(fn {_name, pid, _data} -> pid end)
-      |> Enum.map(fn {name, pid, data} -> %{name: name, pid: pid, data: data} end)
+      |> Stream.uniq_by(fn {id, _pid, _data} -> id end)
+      |> Stream.uniq_by(fn {_id, pid, _data} -> pid end)
+      |> Enum.map(fn {id, pid, data} -> %{id: id, pid: pid, data: data} end)
       |> constant()
     end)
   end
@@ -108,7 +108,7 @@ defmodule Parent.RegistryTest do
   defp small_term(), do: StreamData.scale(term(), fn _size -> 2 end)
 
   defp register_all(registrations) do
-    Enum.reduce(registrations, Registry.new(), &Registry.register(&2, &1.name, &1.pid, &1.data))
+    Enum.reduce(registrations, Registry.new(), &Registry.register(&2, &1.id, &1.pid, &1.data))
   end
 
   defp picks() do

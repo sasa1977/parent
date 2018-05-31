@@ -2,12 +2,12 @@ defmodule Parent.Registry do
   @moduledoc false
   use Parent.PublicTypes
 
-  @opaque t :: %{name_to_pid: %{name => pid}, processes: %{pid => entries}}
-  @type entries :: %{name: name, data: data}
+  @opaque t :: %{id_to_pid: %{id => pid}, processes: %{pid => entries}}
+  @type entries :: %{id: id, data: data}
   @type data :: map
 
   @spec new() :: t
-  def new(), do: %{name_to_pid: %{}, processes: %{}}
+  def new(), do: %{id_to_pid: %{}, processes: %{}}
 
   @spec entries(t) :: entries
   def entries(registry), do: registry.processes
@@ -15,9 +15,9 @@ defmodule Parent.Registry do
   @spec size(t) :: non_neg_integer
   def size(registry), do: registry |> entries() |> Enum.count()
 
-  @spec name(t, pid) :: {:ok, name} | :error
-  def name(registry, pid) do
-    with {:ok, process} <- Map.fetch(registry.processes, pid), do: {:ok, process.name}
+  @spec id(t, pid) :: {:ok, id} | :error
+  def id(registry, pid) do
+    with {:ok, process} <- Map.fetch(registry.processes, pid), do: {:ok, process.id}
   end
 
   @spec data(t, pid) :: {:ok, data} | :error
@@ -25,28 +25,28 @@ defmodule Parent.Registry do
     with {:ok, process} <- Map.fetch(registry.processes, pid), do: {:ok, process.data}
   end
 
-  @spec pid(t, name) :: {:ok, pid} | :error
-  def pid(registry, name), do: Map.fetch(registry.name_to_pid, name)
+  @spec pid(t, id) :: {:ok, pid} | :error
+  def pid(registry, id), do: Map.fetch(registry.id_to_pid, id)
 
-  @spec register(t, name, pid, data) :: t
-  def register(registry, name, pid, data) do
+  @spec register(t, id, pid, data) :: t
+  def register(registry, id, pid, data) do
     if match?(%{processes: %{^pid => _}}, registry),
       do: raise("process #{inspect(pid)} is already registered")
 
-    if match?(%{name_to_pid: %{^name => _}}, registry),
-      do: raise("name #{inspect(name)} is already taken")
+    if match?(%{id_to_pid: %{^id => _}}, registry),
+      do: raise("id #{inspect(id)} is already taken")
 
     registry
-    |> put_in([:name_to_pid, name], pid)
-    |> put_in([:processes, pid], %{name: name, data: data})
+    |> put_in([:id_to_pid, id], pid)
+    |> put_in([:processes, pid], %{id: id, data: data})
   end
 
-  @spec pop(t, pid) :: {:ok, name, data, t} | :error
+  @spec pop(t, pid) :: {:ok, id, data, t} | :error
   def pop(registry, pid) do
     with {:ok, process} <- Map.fetch(registry.processes, pid) do
-      {:ok, process.name, process.data,
+      {:ok, process.id, process.data,
        registry
-       |> update_in([:name_to_pid], &Map.delete(&1, process.name))
+       |> update_in([:id_to_pid], &Map.delete(&1, process.id))
        |> update_in([:processes], &Map.delete(&1, pid))}
     end
   end

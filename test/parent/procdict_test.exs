@@ -14,7 +14,7 @@ defmodule Parent.ProcdictTest do
         %{id: id(child_spec), meta: meta(child_spec), pid: pid}
       end)
       |> Enum.each(fn data ->
-        assert Procdict.name(data.pid) == {:ok, data.id}
+        assert Procdict.id(data.pid) == {:ok, data.id}
         assert Procdict.meta(data.id) == {:ok, data.meta}
       end)
     end
@@ -30,12 +30,12 @@ defmodule Parent.ProcdictTest do
         Agent.stop(pid, :shutdown)
 
         assert_receive {:EXIT, ^pid, reason} = message
-        assert {:EXIT, ^pid, name, meta, ^reason} = Procdict.handle_message(message)
-        assert name == id(child_spec)
+        assert {:EXIT, ^pid, id, meta, ^reason} = Procdict.handle_message(message)
+        assert id == id(child_spec)
         assert meta == meta(child_spec)
 
         assert Procdict.pid(id(child_spec)) == :error
-        assert Procdict.name(pid) == :error
+        assert Procdict.id(pid) == :error
       end)
     end
   end
@@ -52,7 +52,7 @@ defmodule Parent.ProcdictTest do
         refute Process.alive?(pid)
         refute_receive {:EXIT, ^pid, _reason}
         assert Procdict.pid(id(child_spec)) == :error
-        assert Procdict.name(pid) == :error
+        assert Procdict.id(pid) == :error
       end)
     end
   end

@@ -4,13 +4,13 @@ defmodule Parent.PublicTypes do
   defmacro __using__(_) do
     quote do
       @type child_spec :: %{
-              :id => name,
+              :id => id,
               :start => start,
               optional(:meta) => child_meta,
               optional(:shutdown) => shutdown
             }
 
-      @type name :: term
+      @type id :: term
       @type child_meta :: term
 
       @type start :: (() -> on_start_child) | {module, atom, [term]}
@@ -18,7 +18,7 @@ defmodule Parent.PublicTypes do
 
       @type shutdown :: non_neg_integer() | :infinity | :brutal_kill
 
-      @type child :: {name, pid, child_meta}
+      @type child :: {id, pid, child_meta}
     end
   end
 end
