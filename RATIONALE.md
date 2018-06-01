@@ -2,7 +2,7 @@
 
 When it comes to OTP supervision trees, the usual good practice is to run each process under some supervisor. In other words, a process which is a parent of other processes should most often be a supervisor. While this is most often a good approach, there are some cases where it's better to start processes directly under a GenServer or some other non-supervisor.
 
-Direct parenting requires the implementation to take some roles of the supervisor. The process should usually trap exits, keep track of its children, and ensure that all children are terminated before the parent itself stops.
+Direct parenting requires the implementation to take some roles of the supervisor. The process should usually trap exits, keep track of its child processes, and ensure that all child processes are terminated before the parent itself stops.
 
 While this is not very hard to implement (and I advise doing it for practice), it will lead to some boilerplate. I've personally encountered a couple of cases where I needed to code this from scratch, and it took some time and careful programming to get it right. The parent library is an attempt to extract the typical implementation into a common behaviour.
 
@@ -10,7 +10,7 @@ Currently, the only provided behaviour is `Parent.GenServer`, which is basically
 
 ## Parent.GenServer
 
-`Parent.GenServer` is a specialization of a GenServer. You can think of it as a mixture of GenServer, Supervisor, and Registry. The behaviour allows you to implement a server process which needs to parent one or more children, which can be started and stopped on-demand.
+`Parent.GenServer` is a specialization of a GenServer. You can think of it as a mixture of GenServer, Supervisor, and Registry. The behaviour allows you to implement a server process which needs to parent one or more child processes, which can be started and stopped on-demand.
 
 The behaviour is used in a standard way:
 
@@ -24,9 +24,9 @@ end
 
 Once the behaviour is used, you can work with your module as if it was a GenServer. In other words you can use all the functions from the Elixir's GenServer module, and implement the same callbacks (e.g. `init/1`, `handle_call/3`, ...) with exactly the same interface and semantics.
 
-However, there are some differences: a server powered by `Parent.GenServer` by default traps exits. The behaviour will also take down all the known children on termination. Finally, the default version of injected `child_spec/1` uses `:infinity` as the shutdown value.
+However, there are some differences: a server powered by `Parent.GenServer` by default traps exits. The behaviour will also take down all the known child processes on termination. Finally, the default version of injected `child_spec/1` uses `:infinity` as the shutdown value.
 
-The principal feature of `Parent.GenServer` is the ability to start immediate children. This can be done with `start_child/1`, which must be invoked in the server process. The function takes a child specification as its single argument. The specification is a variation of a child spec map used with supervisors. In its full shape the child spec has the following type specification:
+The principal feature of `Parent.GenServer` is the ability to start immediate child processes. This can be done with `start_child/1`, which must be invoked in the server process. The function takes a child specification as its single argument. The specification is a variation of a child spec map used with supervisors. In its full shape the child spec has the following type specification:
 
 ```elixir
 %{
@@ -63,9 +63,9 @@ And now, to start the parent server, you can invoke `Parent.GenServer.start_link
 
 Once a process is started, casts and calls are issued through Elixir's GenServer module. The `Parent.GenServer` module doesn't export any function which can be used to manipulate the parent server from the outside. So to reiterate: a `Parent.GenServer` is essentially a GenServer.
 
-You might wonder what's the benefit of `start_child/1` vs plain `Task.start_link`. The first benefit is that any child started through `start_child/1` is known to the  behaviour. Therefore, while terminating, the behaviour will make sure to take all the children down. This guarantees that if the parent is taken down, the children will not be left lingering.
+You might wonder what's the benefit of `start_child/1` vs plain `Task.start_link`. The first benefit is that any child started through `start_child/1` is known to the  behaviour. Therefore, while terminating, the behaviour will make sure to take all the child processes down. This guarantees that if the parent is taken down, the child processes will not be left lingering.
 
-Another benefit is that you can use other `Parent.GenServer` functions to work with children started with `start_child/1`. You can enumerate the children, fetch individual children by their name (child spec id), and know the count of alive child processes. This is where `Parent.GenServer` serves as a kind of a unique registry.
+Another benefit is that you can use other `Parent.GenServer` functions to work with child processes started with `start_child/1`. You can enumerate the child processes, fetch individual children by their id, and know the count of alive child processes. This is where `Parent.GenServer` serves as a kind of a unique registry.
 
 Finally, if a child terminates, the behaviour will handle the corresponding `:EXIT` message, and convert it into the callback `handle_child_terminated(child_name :: term, meta :: term, pid, reason :: term, state)`. This is the only callback specific to `Parent.GenServer`.
 
@@ -75,7 +75,7 @@ This pretty much covers the `Parent.GenServer` behaviour. In my opinion, it's a 
 
 Careful readers might have noticed that the behaviour manages its state implicitly. When `Parent.GenServer.start_child/1` succeeds, the function returns `{:ok, pid}`, while the internal behaviour state is implicitly changed. In other words, `start_child/1` is a function with a side-effect.
 
-The main reason why this approach is chosen is because starting of a child is by itself a side-effect operation. Thus, as soon as the new child is started, we want it to be included in other behaviour functions (e.g. when enumerating children or mapping a name to a pid). Using implicit state allows exactly this and leaves no place for mistakes. As an added bonus, the implicit state simplifies the interface of the callbacks, and allows `Parent.GenServer` to work exactly as a GenServer, which simplifies the transition to a parented version, and lowers the learning curve.
+The main reason why this approach is chosen is because starting of a child is by itself a side-effect operation. Thus, as soon as the new child is started, we want it to be included in other behaviour functions (e.g. when enumerating child processes or mapping a name to a pid). Using implicit state allows exactly this and leaves no place for mistakes. As an added bonus, the implicit state simplifies the interface of the callbacks, and allows `Parent.GenServer` to work exactly as a GenServer, which simplifies the transition to a parented version, and lowers the learning curve.
 
 For state storage, the behaviour uses the controversial process dictionary. This approach is chosen, since it keeps the entire state inside the process, so there's no data-copying involved nor are extra BEAM resources used (which would be the case if ETS or e.g. Agent was chosen).
 
@@ -341,6 +341,6 @@ You might wonder how this compares to poolboy and similar pooling libraries. Whi
 
 I've previously implemented all of the scenarios above using vanilla GenServer, and I find the parent-based code to be much more focused on it's main job (periodic execution, cancellation, queuing).
 
-This is precisely the goal of the parent library. I've seen such scenarios often enough to be annoyed by manual implementation from scratch. Beyond just saving typing and improving the reading experience, I think that the abstraction reduces the potential for accidental bugs. A manual implementation has to keep track of running children, worry about `:EXIT` or `:DOWN` messages, and make sure to terminate the children before it stops. All of this is automatically taken care of by the `Parent.GenServer`. Finally, compared to high-level out-of-the-box solutions such as quantum and poolboy, parent is less feature rich, but I think it's easier to reason about, and supports a wider set of scenarios.
+This is precisely the goal of the parent library. I've seen such scenarios often enough to be annoyed by manual implementation from scratch. Beyond just saving typing and improving the reading experience, I think that the abstraction reduces the potential for accidental bugs. A manual implementation has to keep track of running child processes, worry about `:EXIT` or `:DOWN` messages, and make sure to terminate the child processes before it stops. All of this is automatically taken care of by the `Parent.GenServer`. Finally, compared to high-level out-of-the-box solutions such as quantum and poolboy, parent is less feature rich, but I think it's easier to reason about, and supports a wider set of scenarios.
 
 On the downside, this is in some ways a dangerous behaviour. It should be made clear that parent is not appropriate in all scenarios, and that standard supervision is most often the recommended approach. Since the parent process is not a supervisor, code reloading won't work (though I think we could make it work). That's why I feel that parent is suitable to parent only jobs, i.e. processes which stop in a finite amount of time, and don't serve requests from other processes in the system.

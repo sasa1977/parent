@@ -1,6 +1,6 @@
 defmodule Parent.GenServer do
   @moduledoc """
-  A GenServer extension which simplifies parenting of children.
+  A GenServer extension which simplifies parenting of child processes.
 
   This behaviour helps implementing a GenServer which also needs to directly
   start child processes and handle their termination.
@@ -48,9 +48,9 @@ defmodule Parent.GenServer do
   - A Parent.GenServer traps exits by default.
   - The generated `child_spec/1` has the `:shutdown` configured to `:infinity`.
 
-  ## Starting children
+  ## Starting child processes
 
-  To start a child, you can invoke `start_child/1` in the parent process:
+  To start a child process, you can invoke `start_child/1` in the parent process:
 
   ```
   def handle_call(...) do
@@ -94,8 +94,8 @@ defmodule Parent.GenServer do
 
   ## Handling child termination
 
-  When a child terminates, `handle_child_terminated/5` will be invoked. The
-  default implementation is injected into the module, but you can of course
+  When a child process terminates, `handle_child_terminated/5` will be invoked.
+  The default implementation is injected into the module, but you can of course
   override it:
 
   ```
@@ -114,18 +114,18 @@ defmodule Parent.GenServer do
   terminate the child if it doesn't stop within the given time. In this case,
   `handle_child_terminated/5` will be invoked with the exit reason `:timeout`.
 
-  ## Working with children
+  ## Working with child processes
 
-  This module provide various functions for managing the children. For example,
+  This module provide various functions for managing child processes. For example,
   you can enumerate running children with `children/0`, fetch child meta with
-  `child_meta/1`, or terminate a child with `shutdown_child/1`.
+  `child_meta/1`, or terminate a child process with `shutdown_child/1`.
 
   ## Termination
 
-  The behaviour takes down the children during termination, to ensure that no
-  child is running after the parent has terminated. This happens after the
-  `terminate/1` callback returns. Therefore in `terminate/1` the children are
-  still running, and you can interact with them.
+  The behaviour takes down the child processes during termination, to ensure that
+  no child process is running after the parent has terminated. This happens after
+  the `terminate/1` callback returns. Therefore in `terminate/1` the child
+  processes are still running, and you can interact with them.
   """
   use GenServer
   use Parent.PublicTypes
@@ -159,27 +159,27 @@ defmodule Parent.GenServer do
   defdelegate shutdown_child(child_id), to: Parent.Procdict
 
   @doc """
-  Terminates all running children.
+  Terminates all running child processes.
 
-  The order in which children are taken down is not guaranteed.
-  The function returns after all of the children have been terminated.
+  The order in which processes are taken down is not guaranteed.
+  The function returns after all of the processes have been terminated.
   """
   @spec shutdown_all(reason :: term) :: :ok
   defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
 
-  @doc "Returns the list of running children."
+  @doc "Returns the list of running child processes."
   @spec children :: [child]
   defdelegate children(), to: Parent.Procdict, as: :entries
 
-  @doc "Returns the count of running children."
+  @doc "Returns the count of running child processes."
   @spec num_children() :: non_neg_integer
   defdelegate num_children(), to: Parent.Procdict, as: :size
 
-  @doc "Returns the id of a child with the given pid."
+  @doc "Returns the id of a child process with the given pid."
   @spec child_id(pid) :: {:ok, id} | :error
   defdelegate child_id(pid), to: Parent.Procdict, as: :id
 
-  @doc "Returns the pid of a child with the given id."
+  @doc "Returns the pid of a child process with the given id."
   @spec child_pid(id) :: {:ok, pid} | :error
   defdelegate child_pid(id), to: Parent.Procdict, as: :pid
 
@@ -187,12 +187,12 @@ defmodule Parent.GenServer do
   @spec child_meta(id) :: {:ok, child_meta} | :error
   defdelegate child_meta(id), to: Parent.Procdict, as: :meta
 
-  @doc "Updates the meta of the given child."
+  @doc "Updates the meta of the given child process."
   @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
   defdelegate update_child_meta(id, updater), to: Parent.Procdict, as: :update_meta
 
   @doc """
-  Returns true if the child is still running, false otherwise.
+  Returns true if the child process is still running, false otherwise.
 
   Note that this function might return true even if the child has terminated.
   This can happen if the corresponding `:EXIT` message still hasn't been
