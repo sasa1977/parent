@@ -192,6 +192,15 @@ defmodule Parent.GenServer do
   defdelegate update_child_meta(id, updater), to: Parent.Procdict, as: :update_meta
 
   @doc """
+  Awaits for the child to terminate.
+
+  If the function succeeds, `handle_child_terminated/5` will not be invoked.
+  """
+  @spec await_child_termination(id, non_neg_integer() | :infinity) ::
+          {pid, child_meta, reason :: term} | :timeout
+  defdelegate await_child_termination(id, timeout), to: Parent.Procdict, as: :await_termination
+
+  @doc """
   Returns true if the child process is still running, false otherwise.
 
   Note that this function might return true even if the child has terminated.

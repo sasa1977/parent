@@ -123,6 +123,26 @@ defmodule Parent.Functional do
 
   def handle_message(_state, _other), do: :error
 
+  @spec await_termination(t, id, non_neg_integer() | :infinity) ::
+          {{pid, child_meta, reason :: term}, t} | :timeout
+  def await_termination(state, child_id, timeout) do
+    case Registry.pid(state.registry, child_id) do
+      :error ->
+        raise "unknown child"
+
+      {:ok, pid} ->
+        receive do
+          {:EXIT, ^pid, reason} ->
+            with {:ok, ^child_id, data, registry} <- Registry.pop(state.registry, pid) do
+              kill_timer(data.timer_ref, pid)
+              {{pid, data.meta, reason}, %{state | registry: registry}}
+            end
+        after
+          timeout -> :timeout
+        end
+    end
+  end
+
   @spec shutdown_all(t, term) :: t
   def shutdown_all(state, reason) do
     state = terminate_all_children(state, shutdown_reason(reason))

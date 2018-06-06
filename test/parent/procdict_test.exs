@@ -4,6 +4,29 @@ defmodule Parent.ProcdictTest do
   alias Parent.Procdict
   import Parent.ChildSpecGenerators
 
+  test "awaits child termination" do
+    init()
+
+    child = %{id: :child, start: fn -> Task.start_link(fn -> :ok end) end, meta: :child_meta}
+    {:ok, child_pid} = Procdict.start_child(child)
+
+    assert {^child_pid, :child_meta, :normal} = Procdict.await_termination(:child, 1000)
+    refute Process.alive?(child_pid)
+    assert Procdict.size() == 0
+  end
+
+  test "timeouts awaiting child termination" do
+    init()
+
+    child = %{id: :child, start: fn -> Agent.start_link(fn -> :ok end) end, meta: :child_meta}
+    {:ok, child_pid} = Procdict.start_child(child)
+
+    assert Procdict.await_termination(:child, 100) == :timeout
+    assert Process.alive?(child_pid)
+    assert Procdict.size() == 1
+    assert Procdict.entries() == [{:child, child_pid, :child_meta}]
+  end
+
   property "started processes are registered" do
     check all child_specs <- child_specs(successful_child_spec()) do
       init()

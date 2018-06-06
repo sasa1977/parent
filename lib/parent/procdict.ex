@@ -44,6 +44,15 @@ defmodule Parent.Procdict do
     end
   end
 
+  @spec await_termination(id, non_neg_integer() | :infinity) ::
+          {pid, child_meta, reason :: term} | :timeout
+  def await_termination(child_id, timeout) do
+    with {result, state} <- Functional.await_termination(state(), child_id, timeout) do
+      store(state)
+      result
+    end
+  end
+
   @spec entries :: [child]
   def entries(), do: Functional.entries(state())
 

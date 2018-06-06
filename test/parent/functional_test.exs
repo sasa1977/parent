@@ -49,6 +49,32 @@ defmodule Parent.FunctionalTest do
     refute Process.alive?(timeout_pid)
   end
 
+  test "awaits child termination" do
+    state = Functional.initialize()
+
+    child = %{id: :child, start: fn -> Task.start_link(fn -> :ok end) end, meta: :child_meta}
+
+    {:ok, child_pid, state} = Functional.start_child(state, child)
+
+    assert {result, state} = Functional.await_termination(state, :child, 1000)
+    refute Process.alive?(child_pid)
+    assert result == {child_pid, :child_meta, :normal}
+    assert Functional.size(state) == 0
+  end
+
+  test "timeouts awaiting child termination" do
+    state = Functional.initialize()
+
+    child = %{id: :child, start: fn -> Agent.start_link(fn -> :ok end) end, meta: :child_meta}
+
+    {:ok, child_pid, state} = Functional.start_child(state, child)
+
+    assert Functional.await_termination(state, :child, 100) == :timeout
+    assert Process.alive?(child_pid)
+    assert Functional.size(state) == 1
+    assert Functional.entries(state) == [{:child, child_pid, :child_meta}]
+  end
+
   property "started processes are registered" do
     check all child_specs <- child_specs(successful_child_spec()) do
       initial_data = %{state: Functional.initialize(), children: []}

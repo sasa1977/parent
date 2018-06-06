@@ -128,6 +128,31 @@ defmodule Parent.GenServerTest do
     end
   end
 
+  defp verify_command(:await_child_termination, pid) do
+    children = record_child_change(pid, nil, fn -> nil end).after.children
+
+    if Enum.count(children) > 0 do
+      [{child_id, child_pid, meta}] = Enum.take(children, 1)
+
+      change =
+        record_child_change(pid, child_id, fn ->
+          stop_child(pid, child_pid, child_id, :normal)
+          Parent.GenServer.await_child_termination(child_id, 1000)
+        end)
+
+      assert change.result == {child_pid, meta, :normal}
+
+      refute Process.alive?(child_pid)
+      assert change.after.child? == false
+      assert change.after.num_children == change.before.num_children - 1
+      assert change.after.child_pid == :error
+      child = Enum.find(change.after.children, fn {_id, pid, _meta} -> pid == child_pid end)
+      assert child == nil
+
+      assert Enum.find(change.after.terminated_jobs, &(&1.pid == child_pid)) == nil
+    end
+  end
+
   defp verify_command(:shutdown_all, pid) do
     change =
       record_child_change(pid, nil, fn ->
@@ -161,6 +186,7 @@ defmodule Parent.GenServerTest do
       :start_job,
       :start_timeout_job,
       {:stop_job, shutdown_type()},
+      :await_child_termination,
       :shutdown_all,
       :update_meta
     ]
