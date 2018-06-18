@@ -1,0 +1,3 @@
+%{
+  "parent": {:hex, :parent, "0.3.0", "d198ce74eb8951441c3d5891ffdb871b7e94b7863c5d605202838bd8b2ddafec", [:mix], [], "hexpm"},
+}
