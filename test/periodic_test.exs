@@ -60,6 +60,16 @@ defmodule PeriodicTest do
     assert_receive :running, 200
   end
 
+  test "initial_delay" do
+    Periodic.start_link(every: 300, run: pinger(), initial_delay: 100)
+
+    refute_receive :running, 50
+    assert_receive :running, 100
+
+    refute_receive :running, 150
+    assert_receive :running, 300
+  end
+
   defp pinger(extra \\ fn -> :ok end) do
     owner = self()
 

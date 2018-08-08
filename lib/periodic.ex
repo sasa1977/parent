@@ -25,6 +25,24 @@ defmodule Periodic do
   ...
   ```
 
+  By default the first execution will occur after the `every` interval. To override this
+  you can set the `initial_delay` option:
+
+  ```
+  Supervisor.start_link(
+    [
+      {Periodic,
+       run: {IO, :puts, ["Hello, World!"]},
+       initial_delay: :timer.seconds(1),
+       every: :timer.seconds(10)}
+    ],
+    strategy: :one_for_one
+  )
+
+  Hello, World!   # after one second
+  Hello, World!   # after ten seconds
+  ```
+
   ## Multiple children under the same supervisor
 
   You can start multiple periodic tasks under the same supervisor. However,
@@ -103,6 +121,7 @@ defmodule Periodic do
 
   @type opts :: [
           every: duration,
+          initial_delay: duration,
           run: job_spec,
           overlap?: boolean,
           timeout: duration,
@@ -127,6 +146,7 @@ defmodule Periodic do
   @impl GenServer
   def init(opts) do
     state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
+    enqueue_initial(state)
     enqueue_next(state)
     {:ok, state}
   end
@@ -148,7 +168,15 @@ defmodule Periodic do
     {:noreply, state}
   end
 
-  defp defaults(), do: %{overlap?: true, timeout: :infinity, log_level: nil, log_meta: []}
+  defp defaults() do
+    %{
+      overlap?: true,
+      timeout: :infinity,
+      initial_delay: :infinity,
+      log_level: nil,
+      log_meta: []
+    }
+  end
 
   defp maybe_start_job(state) do
     if state.overlap? == true or not job_running?() do
@@ -175,6 +203,9 @@ defmodule Periodic do
 
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
+
+  defp enqueue_initial(%{initial_delay: :infinity}), do: :ok
+  defp enqueue_initial(state), do: Process.send_after(self(), :run_job, state.initial_delay)
 
   defp enqueue_next(%{every: :infinity}), do: :ok
   defp enqueue_next(state), do: Process.send_after(self(), :run_job, state.every)
