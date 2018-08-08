@@ -1,3 +1,7 @@
+# 0.4.0
+
+- Added support for `:initial_delay` in `Periodic`
+
 # 0.3.0
 
 - Added `Parent.GenServer.await_child_termination/2`
