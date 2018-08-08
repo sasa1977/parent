@@ -25,6 +25,24 @@ defmodule Periodic do
   ...
   ```
 
+  By default the first execution will occur after the `every` interval. To override this
+  you can set the `initial_delay` option:
+
+  ```
+  Supervisor.start_link(
+    [
+      {Periodic,
+       run: {IO, :puts, ["Hello, World!"]},
+       initial_delay: :timer.seconds(1),
+       every: :timer.seconds(10)}
+    ],
+    strategy: :one_for_one
+  )
+
+  Hello, World!   # after one second
+  Hello, World!   # after ten seconds
+  ```
+
   ## Multiple children under the same supervisor
 
   You can start multiple periodic tasks under the same supervisor. However,
@@ -103,6 +121,7 @@ defmodule Periodic do
 
   @type opts :: [
           every: duration,
+          initial_delay: duration,
           run: job_spec,
           overlap?: boolean,
           timeout: duration,
@@ -127,14 +146,15 @@ defmodule Periodic do
   @impl GenServer
   def init(opts) do
     state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
-    enqueue_next(state)
+    {initial_delay, state} = Map.pop(state, :initial_delay, Map.fetch!(state, :every))
+    enqueue_next(initial_delay)
     {:ok, state}
   end
 
   @impl GenServer
   def handle_info(:run_job, state) do
     maybe_start_job(state)
-    enqueue_next(state)
+    enqueue_next(state.every)
     {:noreply, state}
   end
 
@@ -148,7 +168,14 @@ defmodule Periodic do
     {:noreply, state}
   end
 
-  defp defaults(), do: %{overlap?: true, timeout: :infinity, log_level: nil, log_meta: []}
+  defp defaults() do
+    %{
+      overlap?: true,
+      timeout: :infinity,
+      log_level: nil,
+      log_meta: []
+    }
+  end
 
   defp maybe_start_job(state) do
     if state.overlap? == true or not job_running?() do
@@ -176,8 +203,8 @@ defmodule Periodic do
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
 
-  defp enqueue_next(%{every: :infinity}), do: :ok
-  defp enqueue_next(state), do: Process.send_after(self(), :run_job, state.every)
+  defp enqueue_next(:infinity), do: :ok
+  defp enqueue_next(delay), do: Process.send_after(self(), :run_job, delay)
 
   defp log(state, message) do
     if not is_nil(state.log_level), do: Logger.log(state.log_level, message, state.log_meta)
