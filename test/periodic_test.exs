@@ -67,7 +67,7 @@ defmodule PeriodicTest do
     assert_receive :running, 100
 
     refute_receive :running, 150
-    assert_receive :running, 300
+    assert_receive :running, 400
   end
 
   defp pinger(extra \\ fn -> :ok end) do

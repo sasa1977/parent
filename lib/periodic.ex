@@ -146,15 +146,15 @@ defmodule Periodic do
   @impl GenServer
   def init(opts) do
     state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
-    enqueue_initial(state)
-    enqueue_next(state)
+    {initial_delay, state} = Map.pop(state, :initial_delay, Map.fetch!(state, :every))
+    enqueue_next(initial_delay)
     {:ok, state}
   end
 
   @impl GenServer
   def handle_info(:run_job, state) do
     maybe_start_job(state)
-    enqueue_next(state)
+    enqueue_next(state.every)
     {:noreply, state}
   end
 
@@ -172,7 +172,6 @@ defmodule Periodic do
     %{
       overlap?: true,
       timeout: :infinity,
-      initial_delay: :infinity,
       log_level: nil,
       log_meta: []
     }
@@ -204,11 +203,8 @@ defmodule Periodic do
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
 
-  defp enqueue_initial(%{initial_delay: :infinity}), do: :ok
-  defp enqueue_initial(state), do: Process.send_after(self(), :run_job, state.initial_delay)
-
-  defp enqueue_next(%{every: :infinity}), do: :ok
-  defp enqueue_next(state), do: Process.send_after(self(), :run_job, state.every)
+  defp enqueue_next(:infinity), do: :ok
+  defp enqueue_next(delay), do: Process.send_after(self(), :run_job, delay)
 
   defp log(state, message) do
     if not is_nil(state.log_level), do: Logger.log(state.log_level, message, state.log_meta)
