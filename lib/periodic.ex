@@ -120,6 +120,7 @@ defmodule Periodic do
   require Logger
 
   @type opts :: [
+          id: term,
           every: duration,
           initial_delay: duration,
           run: job_spec,
