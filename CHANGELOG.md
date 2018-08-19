@@ -1,3 +1,7 @@
+# 0.4.1
+
+- Fixed `Periodic` typespec.
+
 # 0.4.0
 
 - Added support for `:initial_delay` in `Periodic`
