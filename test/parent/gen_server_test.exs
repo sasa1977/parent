@@ -156,28 +156,26 @@ defmodule Parent.GenServerTest do
       {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
 
       child_specs =
-        Enum.map(
-          1..2,
-          &start_child(pid, %{id: &1, start: {Agent, :start_link, [fn -> :ok end]}})
-        )
+        Enum.map([{1, :worker}, {2, :supervisor}], fn {id, type} ->
+          start_child(pid, %{id: id, start: {Agent, :start_link, [fn -> :ok end]}, type: type})
+        end)
 
       assert [child1, child2] = :supervisor.which_children(pid)
       assert {1, pid1, :worker, []} = child1
       assert Enum.find(child_specs, &(&1.id == 1)).pid == pid1
 
-      assert {2, pid2, :worker, []} = child2
+      assert {2, pid2, :supervisor, []} = child2
       assert Enum.find(child_specs, &(&1.id == 2)).pid == pid2
     end
 
     test "count children" do
       {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
 
-      Enum.map(
-        1..2,
-        &start_child(pid, %{id: &1, start: {Agent, :start_link, [fn -> :ok end]}})
-      )
+      Enum.map([{1, :worker}, {2, :supervisor}], fn {id, type} ->
+        start_child(pid, %{id: id, start: {Agent, :start_link, [fn -> :ok end]}, type: type})
+      end)
 
-      assert :supervisor.count_children(pid) == [active: 2, specs: 2, supervisors: 0, workers: 2]
+      assert :supervisor.count_children(pid) == [active: 2, specs: 2, supervisors: 1, workers: 1]
     end
 
     test "get callback module" do

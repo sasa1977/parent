@@ -20,8 +20,11 @@ defmodule Parent.Functional do
   end
 
   @spec supervisor_which_children(t) :: [{term(), pid(), :worker, [module()] | :dynamic}]
-  def supervisor_which_children(state),
-    do: Enum.map(entries(state), fn {id, pid, _meta} -> {id, pid, :worker, []} end)
+  def supervisor_which_children(state) do
+    Enum.map(Registry.entries(state.registry), fn {pid, process} ->
+      {process.id, pid, process.data.type, []}
+    end)
+  end
 
   @spec supervisor_count_children(t) :: [
           specs: non_neg_integer,
@@ -33,8 +36,14 @@ defmodule Parent.Functional do
     Enum.reduce(
       Registry.entries(state.registry),
       %{specs: 0, active: 0, supervisors: 0, workers: 0},
-      fn _entry, acc ->
-        %{acc | specs: acc.specs + 1, active: acc.active + 1, workers: acc.workers + 1}
+      fn {_pid, process}, acc ->
+        %{
+          acc
+          | specs: acc.specs + 1,
+            active: acc.active + 1,
+            workers: acc.workers + if(process.data.type == :worker, do: 1, else: 0),
+            supervisors: acc.supervisors + if(process.data.type == :supervisor, do: 1, else: 0)
+        }
       end
     )
     |> Map.to_list()
@@ -78,6 +87,7 @@ defmodule Parent.Functional do
       data = %{
         shutdown: full_child_spec.shutdown,
         meta: full_child_spec.meta,
+        type: full_child_spec.type,
         timer_ref: timer_ref
       }
 
@@ -224,12 +234,21 @@ defmodule Parent.Functional do
   defp shutdown_reason(:normal), do: :shutdown
   defp shutdown_reason(other), do: other
 
-  @default_spec %{shutdown: :timer.seconds(5), meta: nil, timeout: :infinity}
+  @default_spec %{meta: nil, timeout: :infinity}
 
   defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, nil})
   defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
-  defp expand_child_spec(%{} = child_spec), do: Map.merge(@default_spec, child_spec)
+
+  defp expand_child_spec(%{} = child_spec) do
+    @default_spec
+    |> Map.merge(default_type_and_shutdown_spec(Map.get(child_spec, :type, :worker)))
+    |> Map.merge(child_spec)
+  end
+
   defp expand_child_spec(_other), do: raise("invalid child_spec")
+
+  defp default_type_and_shutdown_spec(:worker), do: %{type: :worker, shutdown: :timer.seconds(5)}
+  defp default_type_and_shutdown_spec(:supervisor), do: %{type: :supervisor, shutdown: :infinity}
 
   defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
   defp start_child_process(fun) when is_function(fun, 0), do: fun.()
