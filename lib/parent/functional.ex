@@ -22,7 +22,7 @@ defmodule Parent.Functional do
   @spec supervisor_which_children(t) :: [{term(), pid(), :worker, [module()] | :dynamic}]
   def supervisor_which_children(state) do
     Enum.map(Registry.entries(state.registry), fn {pid, process} ->
-      {process.id, pid, process.data.type, []}
+      {process.id, pid, process.data.type, process.data.modules}
     end)
   end
 
@@ -88,6 +88,7 @@ defmodule Parent.Functional do
         shutdown: full_child_spec.shutdown,
         meta: full_child_spec.meta,
         type: full_child_spec.type,
+        modules: full_child_spec.modules,
         timer_ref: timer_ref
       }
 
@@ -242,6 +243,7 @@ defmodule Parent.Functional do
   defp expand_child_spec(%{} = child_spec) do
     @default_spec
     |> Map.merge(default_type_and_shutdown_spec(Map.get(child_spec, :type, :worker)))
+    |> Map.put(:modules, default_modules(child_spec.start))
     |> Map.merge(child_spec)
   end
 
@@ -249,6 +251,11 @@ defmodule Parent.Functional do
 
   defp default_type_and_shutdown_spec(:worker), do: %{type: :worker, shutdown: :timer.seconds(5)}
   defp default_type_and_shutdown_spec(:supervisor), do: %{type: :supervisor, shutdown: :infinity}
+
+  defp default_modules({mod, _fun, _args}), do: [mod]
+
+  defp default_modules(fun) when is_function(fun),
+    do: [fun |> :erlang.fun_info() |> Keyword.fetch!(:module)]
 
   defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
   defp start_child_process(fun) when is_function(fun, 0), do: fun.()

@@ -161,10 +161,10 @@ defmodule Parent.GenServerTest do
         end)
 
       assert [child1, child2] = :supervisor.which_children(pid)
-      assert {1, pid1, :worker, []} = child1
+      assert {1, pid1, :worker, [Agent]} = child1
       assert Enum.find(child_specs, &(&1.id == 1)).pid == pid1
 
-      assert {2, pid2, :supervisor, []} = child2
+      assert {2, pid2, :supervisor, [Agent]} = child2
       assert Enum.find(child_specs, &(&1.id == 2)).pid == pid2
     end
 
