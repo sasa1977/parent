@@ -19,6 +19,10 @@ defmodule Parent.Functional do
     |> Enum.map(fn {pid, process} -> {process.id, pid, process.data.meta} end)
   end
 
+  @spec supervisor_which_children(t) :: [{term(), pid(), :worker, [module()] | :dynamic}]
+  def supervisor_which_children(state),
+    do: Enum.map(entries(state), fn {id, pid, _meta} -> {id, pid, :worker, []} end)
+
   @spec size(t) :: non_neg_integer
   def size(state), do: Registry.size(state.registry)
 

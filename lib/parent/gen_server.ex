@@ -232,6 +232,9 @@ defmodule Parent.GenServer do
   end
 
   @impl GenServer
+  def handle_call(:which_children, _from, state),
+    do: {:reply, Parent.Procdict.supervisor_which_children(), state}
+
   def handle_call(message, from, state), do: invoke_callback(:handle_call, [message, from, state])
 
   @impl GenServer

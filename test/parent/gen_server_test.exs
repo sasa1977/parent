@@ -151,6 +151,25 @@ defmodule Parent.GenServerTest do
     end)
   end
 
+  describe "supervisor" do
+    test "which children" do
+      {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+
+      child_specs =
+        Enum.map(
+          1..2,
+          &start_child(pid, %{id: &1, start: {Agent, :start_link, [fn -> :ok end]}})
+        )
+
+      assert [child1, child2] = :supervisor.which_children(pid)
+      assert {1, pid1, :worker, []} = child1
+      assert Enum.find(child_specs, &(&1.id == 1)).pid == pid1
+
+      assert {2, pid2, :worker, []} = child2
+      assert Enum.find(child_specs, &(&1.id == 2)).pid == pid2
+    end
+  end
+
   defp record_child_change(pid, child_id, fun) do
     TestServer.call(pid, fn state ->
       before_info = parent_info(child_id)
