@@ -179,6 +179,11 @@ defmodule Parent.GenServerTest do
 
       assert :supervisor.count_children(pid) == [active: 2, specs: 2, supervisors: 0, workers: 2]
     end
+
+    test "get callback module" do
+      {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+      assert :supervisor.get_callback_module(pid) == TestServer
+    end
   end
 
   defp record_child_change(pid, child_id, fun) do

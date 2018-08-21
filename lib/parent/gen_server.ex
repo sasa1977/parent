@@ -247,8 +247,16 @@ defmodule Parent.GenServer do
   def handle_cast(message, state), do: invoke_callback(:handle_cast, [message, state])
 
   @impl GenServer
-  def format_status(reason, pdict_and_state),
-    do: invoke_callback(:format_status, [reason, pdict_and_state])
+  # Needed to support `:supervisor.get_callback_module`
+  def format_status(:normal, [_pdict, state]) do
+    [
+      data: [{~c"State", state}],
+      supervisor: [{~c"Callback", Process.get({__MODULE__, :callback})}]
+    ]
+  end
+
+  def format_status(:terminate, pdict_and_state),
+    do: invoke_callback(:format_status, [:terminate, pdict_and_state])
 
   @impl GenServer
   def code_change(old_vsn, state, extra),
