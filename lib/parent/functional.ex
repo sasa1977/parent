@@ -23,6 +23,23 @@ defmodule Parent.Functional do
   def supervisor_which_children(state),
     do: Enum.map(entries(state), fn {id, pid, _meta} -> {id, pid, :worker, []} end)
 
+  @spec supervisor_count_children(t) :: [
+          specs: non_neg_integer,
+          active: non_neg_integer,
+          supervisors: non_neg_integer,
+          workers: non_neg_integer
+        ]
+  def supervisor_count_children(state) do
+    Enum.reduce(
+      Registry.entries(state.registry),
+      %{specs: 0, active: 0, supervisors: 0, workers: 0},
+      fn _entry, acc ->
+        %{acc | specs: acc.specs + 1, active: acc.active + 1, workers: acc.workers + 1}
+      end
+    )
+    |> Map.to_list()
+  end
+
   @spec size(t) :: non_neg_integer
   def size(state), do: Registry.size(state.registry)
 

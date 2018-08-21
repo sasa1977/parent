@@ -212,6 +212,9 @@ defmodule Parent.GenServer do
 
   @impl GenServer
   def init({callback, arg}) do
+    # needed to simulate a supervisor
+    Process.put(:"$initial_call", {:supervisor, callback, 1})
+
     Process.put({__MODULE__, :callback}, callback)
     Parent.Procdict.initialize()
     invoke_callback(:init, [arg])
@@ -234,6 +237,9 @@ defmodule Parent.GenServer do
   @impl GenServer
   def handle_call(:which_children, _from, state),
     do: {:reply, Parent.Procdict.supervisor_which_children(), state}
+
+  def handle_call(:count_children, _from, state),
+    do: {:reply, Parent.Procdict.supervisor_count_children(), state}
 
   def handle_call(message, from, state), do: invoke_callback(:handle_call, [message, from, state])
 
