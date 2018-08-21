@@ -290,7 +290,8 @@ defmodule Parent.GenServer do
         default = %{
           id: __MODULE__,
           start: {__MODULE__, :start_link, [arg]},
-          shutdown: :infinity
+          shutdown: :infinity,
+          type: :supervisor
         }
 
         Supervisor.child_spec(default, unquote(Macro.escape(opts)))
