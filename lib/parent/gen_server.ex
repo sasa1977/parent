@@ -47,6 +47,7 @@ defmodule Parent.GenServer do
 
   - A Parent.GenServer traps exits by default.
   - The generated `child_spec/1` has the `:shutdown` configured to `:infinity`.
+  - The generated `child_spec/1` specifies the `:type` configured to `:supervisor`
 
   ## Starting child processes
 
@@ -126,6 +127,13 @@ defmodule Parent.GenServer do
   no child process is running after the parent has terminated. This happens after
   the `terminate/1` callback returns. Therefore in `terminate/1` the child
   processes are still running, and you can interact with them.
+
+  ## Supervisor compliance
+
+  A process powered by `Parent.GenServer` can handle supervisor specific
+  messages, which means that for all intents and purposes, such process is
+  treated as a supervisor. As a result, children of parent will be included in
+  the hot code reload process.
   """
   use GenServer
   use Parent.PublicTypes
