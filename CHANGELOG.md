@@ -1,3 +1,7 @@
+# 0.5.0
+
+- add supervisor compliance to support hot code reloads
+
 # 0.4.1
 
 - Fixed `Periodic` typespec.
