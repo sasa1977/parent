@@ -19,6 +19,36 @@ defmodule Parent.Functional do
     |> Enum.map(fn {pid, process} -> {process.id, pid, process.data.meta} end)
   end
 
+  @spec supervisor_which_children(t) :: [{term(), pid(), :worker, [module()] | :dynamic}]
+  def supervisor_which_children(state) do
+    Enum.map(Registry.entries(state.registry), fn {pid, process} ->
+      {process.id, pid, process.data.type, process.data.modules}
+    end)
+  end
+
+  @spec supervisor_count_children(t) :: [
+          specs: non_neg_integer,
+          active: non_neg_integer,
+          supervisors: non_neg_integer,
+          workers: non_neg_integer
+        ]
+  def supervisor_count_children(state) do
+    Enum.reduce(
+      Registry.entries(state.registry),
+      %{specs: 0, active: 0, supervisors: 0, workers: 0},
+      fn {_pid, process}, acc ->
+        %{
+          acc
+          | specs: acc.specs + 1,
+            active: acc.active + 1,
+            workers: acc.workers + if(process.data.type == :worker, do: 1, else: 0),
+            supervisors: acc.supervisors + if(process.data.type == :supervisor, do: 1, else: 0)
+        }
+      end
+    )
+    |> Map.to_list()
+  end
+
   @spec size(t) :: non_neg_integer
   def size(state), do: Registry.size(state.registry)
 
@@ -57,6 +87,8 @@ defmodule Parent.Functional do
       data = %{
         shutdown: full_child_spec.shutdown,
         meta: full_child_spec.meta,
+        type: full_child_spec.type,
+        modules: full_child_spec.modules,
         timer_ref: timer_ref
       }
 
@@ -203,12 +235,27 @@ defmodule Parent.Functional do
   defp shutdown_reason(:normal), do: :shutdown
   defp shutdown_reason(other), do: other
 
-  @default_spec %{shutdown: :timer.seconds(5), meta: nil, timeout: :infinity}
+  @default_spec %{meta: nil, timeout: :infinity}
 
   defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, nil})
   defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
-  defp expand_child_spec(%{} = child_spec), do: Map.merge(@default_spec, child_spec)
+
+  defp expand_child_spec(%{} = child_spec) do
+    @default_spec
+    |> Map.merge(default_type_and_shutdown_spec(Map.get(child_spec, :type, :worker)))
+    |> Map.put(:modules, default_modules(child_spec.start))
+    |> Map.merge(child_spec)
+  end
+
   defp expand_child_spec(_other), do: raise("invalid child_spec")
+
+  defp default_type_and_shutdown_spec(:worker), do: %{type: :worker, shutdown: :timer.seconds(5)}
+  defp default_type_and_shutdown_spec(:supervisor), do: %{type: :supervisor, shutdown: :infinity}
+
+  defp default_modules({mod, _fun, _args}), do: [mod]
+
+  defp default_modules(fun) when is_function(fun),
+    do: [fun |> :erlang.fun_info() |> Keyword.fetch!(:module)]
 
   defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
   defp start_child_process(fun) when is_function(fun, 0), do: fun.()

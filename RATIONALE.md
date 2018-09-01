@@ -24,7 +24,7 @@ end
 
 Once the behaviour is used, you can work with your module as if it was a GenServer. In other words you can use all the functions from the Elixir's GenServer module, and implement the same callbacks (e.g. `init/1`, `handle_call/3`, ...) with exactly the same interface and semantics.
 
-However, there are some differences: a server powered by `Parent.GenServer` by default traps exits. The behaviour will also take down all the known child processes on termination. Finally, the default version of injected `child_spec/1` uses `:infinity` as the shutdown value.
+However, there are some differences: a server powered by `Parent.GenServer` by default traps exits. The behaviour will also take down all the known child processes on termination. Finally, the default version of injected `child_spec/1` uses `:infinity` as the shutdown value, and `:supervisor` as the child type.
 
 The principal feature of `Parent.GenServer` is the ability to start immediate child processes. This can be done with `start_child/1`, which must be invoked in the server process. The function takes a child specification as its single argument. The specification is a variation of a child spec map used with supervisors. In its full shape the child spec has the following type specification:
 

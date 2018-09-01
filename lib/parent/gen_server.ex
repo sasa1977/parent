@@ -47,6 +47,7 @@ defmodule Parent.GenServer do
 
   - A Parent.GenServer traps exits by default.
   - The generated `child_spec/1` has the `:shutdown` configured to `:infinity`.
+  - The generated `child_spec/1` specifies the `:type` configured to `:supervisor`
 
   ## Starting child processes
 
@@ -126,6 +127,13 @@ defmodule Parent.GenServer do
   no child process is running after the parent has terminated. This happens after
   the `terminate/1` callback returns. Therefore in `terminate/1` the child
   processes are still running, and you can interact with them.
+
+  ## Supervisor compliance
+
+  A process powered by `Parent.GenServer` can handle supervisor specific
+  messages, which means that for all intents and purposes, such process is
+  treated as a supervisor. As a result, children of parent will be included in
+  the hot code reload process.
   """
   use GenServer
   use Parent.PublicTypes
@@ -212,6 +220,9 @@ defmodule Parent.GenServer do
 
   @impl GenServer
   def init({callback, arg}) do
+    # needed to simulate a supervisor
+    Process.put(:"$initial_call", {:supervisor, callback, 1})
+
     Process.put({__MODULE__, :callback}, callback)
     Parent.Procdict.initialize()
     invoke_callback(:init, [arg])
@@ -232,14 +243,28 @@ defmodule Parent.GenServer do
   end
 
   @impl GenServer
+  def handle_call(:which_children, _from, state),
+    do: {:reply, Parent.Procdict.supervisor_which_children(), state}
+
+  def handle_call(:count_children, _from, state),
+    do: {:reply, Parent.Procdict.supervisor_count_children(), state}
+
   def handle_call(message, from, state), do: invoke_callback(:handle_call, [message, from, state])
 
   @impl GenServer
   def handle_cast(message, state), do: invoke_callback(:handle_cast, [message, state])
 
   @impl GenServer
-  def format_status(reason, pdict_and_state),
-    do: invoke_callback(:format_status, [reason, pdict_and_state])
+  # Needed to support `:supervisor.get_callback_module`
+  def format_status(:normal, [_pdict, state]) do
+    [
+      data: [{~c"State", state}],
+      supervisor: [{~c"Callback", Process.get({__MODULE__, :callback})}]
+    ]
+  end
+
+  def format_status(:terminate, pdict_and_state),
+    do: invoke_callback(:format_status, [:terminate, pdict_and_state])
 
   @impl GenServer
   def code_change(old_vsn, state, extra),
@@ -273,7 +298,8 @@ defmodule Parent.GenServer do
         default = %{
           id: __MODULE__,
           start: {__MODULE__, :start_link, [arg]},
-          shutdown: :infinity
+          shutdown: :infinity,
+          type: :supervisor
         }
 
         Supervisor.child_spec(default, unquote(Macro.escape(opts)))

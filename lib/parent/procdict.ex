@@ -56,6 +56,17 @@ defmodule Parent.Procdict do
   @spec entries :: [child]
   def entries(), do: Functional.entries(state())
 
+  @spec supervisor_which_children() :: [{term(), pid(), :worker, [module()] | :dynamic}]
+  def supervisor_which_children(), do: Functional.supervisor_which_children(state())
+
+  @spec supervisor_count_children() :: [
+          specs: non_neg_integer,
+          active: non_neg_integer,
+          supervisors: non_neg_integer,
+          workers: non_neg_integer
+        ]
+  def supervisor_count_children(), do: Functional.supervisor_count_children(state())
+
   @spec size() :: non_neg_integer
   def size(), do: Functional.size(state())
 

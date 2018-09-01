@@ -6,6 +6,8 @@ defmodule Parent.PublicTypes do
       @type child_spec :: %{
               :id => id,
               :start => start,
+              optional(:modules) => [module] | :dynamic,
+              optional(:type) => :worker | :supervisor,
               optional(:meta) => child_meta,
               optional(:shutdown) => shutdown,
               optional(:timeout) => pos_integer | :infinity
