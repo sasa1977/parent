@@ -4,7 +4,8 @@ defmodule Parent.Functional do
   use Parent.PublicTypes
 
   @opaque t :: %{registry: Registry.t()}
-  @type on_handle_message :: {{:EXIT, pid, id, term}, t} | :error | :ignore
+  @type on_handle_message :: {child_exit_message, t} | :error | :ignore
+  @type child_exit_message :: {:EXIT, pid, id, child_meta, reason :: term}
 
   @spec initialize() :: t
   def initialize() do

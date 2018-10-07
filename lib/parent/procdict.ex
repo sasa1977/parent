@@ -36,7 +36,7 @@ defmodule Parent.Procdict do
     :ok
   end
 
-  @spec handle_message(term) :: Functional.on_handle_message()
+  @spec handle_message(term) :: Functional.child_exit_message() | :error | :ignore
   def handle_message(message) do
     with {result, state} <- Functional.handle_message(state(), message) do
       store(state)
