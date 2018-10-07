@@ -27,8 +27,12 @@ defmodule Parent.MixProject do
     [
       {:stream_data, "~> 0.4.0", only: [:dev, :test]},
       {:dialyxir, "~> 0.5.0", runtime: false, only: [:dev, :test]},
-      {:ex_doc, "~> 0.16", only: :dev, runtime: false}
+      {:ex_doc, "~> #{ex_doc_version()}", only: :dev, runtime: false}
     ]
+  end
+
+  defp ex_doc_version() do
+    if Version.compare(System.version(), "1.7.0") == :lt, do: "0.18.0", else: "0.19"
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
