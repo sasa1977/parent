@@ -1,3 +1,7 @@
+# 0.5.1
+
+- support handle_continue on Elixir 1.7.x or greater
+
 # 0.5.0
 
 - add supervisor compliance to support hot code reloads
