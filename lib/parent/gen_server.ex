@@ -277,6 +277,11 @@ defmodule Parent.GenServer do
     Parent.Procdict.shutdown_all(reason)
   end
 
+  unless Version.compare(System.version(), "1.7.0") == :lt do
+    @impl GenServer
+    def handle_continue(continue, state), do: invoke_callback(:handle_continue, [continue, state])
+  end
+
   defp invoke_callback(fun, arg), do: apply(Process.get({__MODULE__, :callback}), fun, arg)
 
   @doc false
