@@ -16,6 +16,13 @@ defmodule Parent.GenServerTest do
     assert :sys.get_state(pid) == :new_state
   end
 
+  test "call which throws a reply" do
+    {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+
+    assert TestServer.call(pid, fn _state -> throw({:reply, :response, :new_state}) end)
+    assert :sys.get_state(pid) == :new_state
+  end
+
   test "cast" do
     {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
     assert TestServer.cast(pid, fn state -> {:updated_state, state} end) == :ok
