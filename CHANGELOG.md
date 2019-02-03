@@ -1,3 +1,9 @@
+# 0.6.0
+
+- The `:overlap?` option in `Periodic` is deprecated. Use `:on_overlap` instead.
+- Added support for termination of previous job instances in `Periodic` via the `:on_overlap` option.
+- Added support for the shifted delay mode in `Periodic` via the `:delay_mode` option.
+
 # 0.5.1
 
 - support handle_continue on Elixir 1.7.x or greater
