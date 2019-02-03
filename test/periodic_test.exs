@@ -36,7 +36,7 @@ defmodule PeriodicTest do
   end
 
   test "job is started on every interval if overlapping is allowed" do
-    scheduler_pid = start_test_scheduler(every: 1, overlap?: true)
+    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :run)
 
     next_tick(scheduler_pid)
     assert_job_started()
@@ -56,7 +56,7 @@ defmodule PeriodicTest do
   end
 
   test "only one instance of job can run if overlapping is not allowed" do
-    scheduler_pid = start_test_scheduler(every: 1, overlap?: false)
+    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :ignore)
 
     next_tick(scheduler_pid)
     assert_job_started()
@@ -65,8 +65,21 @@ defmodule PeriodicTest do
     refute_job_started()
   end
 
+  test "previous instance of job is terminated if overlapping is set to stop_previous" do
+    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :stop_previous)
+
+    next_tick(scheduler_pid)
+    first_instance = assert_job_started()
+    mref = Process.monitor(first_instance)
+
+    next_tick(scheduler_pid)
+    assert_job_started()
+
+    assert_receive {:DOWN, ^mref, :process, ^first_instance, :shutdown}
+  end
+
   test "if overlapping is not allowed, next job is started after the previous one is done" do
-    scheduler_pid = start_test_scheduler(every: 1, overlap?: false)
+    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :run)
 
     next_tick(scheduler_pid)
     job_pid = assert_job_started()

@@ -70,7 +70,15 @@ defmodule Periodic do
 
   By default, the jobs are running as overlapped. This means that a new job
   instance will be started even if the previous one is not running. If you want
-  to change that, you can pass the `overlap?: false` option.
+  to change that, you can use the `:on_overlap` option which can have the
+  following values:
+
+    - `:run` - new job instance is always started
+    - `:ignore` - new job instance is not started if the previous one is
+                  still running
+    - `:stop_previous` - previous job instances are terminated before the new
+                          one is started
+
 
   ## Disabling execution
 
@@ -124,7 +132,7 @@ defmodule Periodic do
           every: duration,
           initial_delay: duration,
           run: job_spec,
-          overlap?: boolean,
+          on_overlap: :run | :ignore | :stop_previous,
           timeout: duration,
           log_level: nil | Logger.level(),
           log_meta: Keyword.t()
@@ -134,7 +142,19 @@ defmodule Periodic do
 
   @doc "Starts the periodic executor."
   @spec start_link(opts) :: GenServer.on_start()
-  def start_link(opts), do: Parent.GenServer.start_link(__MODULE__, Map.new(opts))
+  def start_link(opts), do: Parent.GenServer.start_link(__MODULE__, normalize_opts(opts))
+
+  defp normalize_opts(opts) do
+    opts = Map.new(opts)
+
+    with %{overlap?: overlap?} <- opts do
+      Logger.warn("The `:overlap?` option is deprecated, use `:on_overlap` instead.")
+
+      opts
+      |> Map.put(:on_overlap, if(overlap?, do: :run, else: :ignore))
+      |> Map.delete(:overlap?)
+    end
+  end
 
   @doc "Builds a child specification for starting the periodic executor."
   @spec child_spec(opts) :: Supervisor.child_spec()
@@ -149,14 +169,14 @@ defmodule Periodic do
     {send_after_fun, opts} = Map.pop(opts, :send_after_fun, &Process.send_after/3)
     state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
     {initial_delay, state} = Map.pop(state, :initial_delay, Map.fetch!(state, :every))
-    enqueue_next(initial_delay, send_after_fun)
+    enqueue_next_tick(initial_delay, send_after_fun)
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info({:run_job, send_after_fun}, state) do
-    maybe_start_job(state)
-    enqueue_next(state.every, send_after_fun)
+  def handle_info({:tick, send_after_fun}, state) do
+    handle_tick(state)
+    enqueue_next_tick(state.every, send_after_fun)
     {:noreply, state}
   end
 
@@ -172,30 +192,41 @@ defmodule Periodic do
 
   defp defaults() do
     %{
-      overlap?: true,
+      on_overlap: :run,
       timeout: :infinity,
       log_level: nil,
       log_meta: []
     }
   end
 
-  defp maybe_start_job(state) do
-    if state.overlap? == true or not job_running?() do
-      start_job(state)
-    else
-      log(state, "previous job still running, not starting another instance")
+  defp handle_tick(state) do
+    case state.on_overlap do
+      :run ->
+        start_job(state)
+
+      :ignore ->
+        if previous_instances_running?(),
+          do: log(state, "previous job still running, not starting another instance"),
+          else: start_job(state)
+
+      :stop_previous ->
+        if previous_instances_running?() do
+          log(state, "terminating previous jobs")
+          Parent.GenServer.shutdown_all()
+        end
+
+        start_job(state)
     end
   end
 
-  defp job_running?(), do: Parent.GenServer.child?(:job)
+  defp previous_instances_running?(), do: Parent.GenServer.num_children() > 0
 
   defp start_job(state) do
     log(state, "starting the job")
-    id = if state.overlap?, do: make_ref(), else: :job
     job = state.run
 
     Parent.GenServer.start_child(%{
-      id: id,
+      id: make_ref(),
       start: {Task, :start_link, [fn -> invoke_job(job) end]},
       timeout: state.timeout,
       shutdown: :brutal_kill
@@ -205,10 +236,10 @@ defmodule Periodic do
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
 
-  defp enqueue_next(:infinity, _send_after_fun), do: :ok
+  defp enqueue_next_tick(:infinity, _send_after_fun), do: :ok
 
-  defp enqueue_next(delay, send_after_fun),
-    do: send_after_fun.(self(), {:run_job, send_after_fun}, delay)
+  defp enqueue_next_tick(delay, send_after_fun),
+    do: send_after_fun.(self(), {:tick, send_after_fun}, delay)
 
   defp log(state, message) do
     if not is_nil(state.log_level), do: Logger.log(state.log_level, message, state.log_meta)
