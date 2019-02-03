@@ -66,6 +66,22 @@ defmodule Periodic do
   ...
   ```
 
+  ## Delay mode
+
+  The `:delay_mode` option can be used to configure how the `:every` option is
+  interpreted. It can have the following values:
+
+    - `:regular` - The `:every` option represents the time between two
+                   consecutive starts of the job. This is the default value.
+    - `:shifted` - The `:every` option represents the time between the
+                   termination of the job and the start of the next instance.
+
+  Keep in mind that, regardless of the delay mode, `Periodic` doesn't attempt
+  to correct a time skew between executions. Even in the regular mode, the
+  delay between two consecutive jobs might be higher than specified, for example
+  if the system is overloaded. If such higher delay happens, it will not be
+  compensated for.
+
   ## Overlapped execution
 
   By default, the jobs are running as overlapped. This means that a new job
@@ -73,12 +89,13 @@ defmodule Periodic do
   to change that, you can use the `:on_overlap` option which can have the
   following values:
 
-    - `:run` - new job instance is always started
+    - `:run` - The new job instance is always started. This is the default value.
     - `:ignore` - new job instance is not started if the previous one is
                   still running
     - `:stop_previous` - previous job instances are terminated before the new
                           one is started
 
+  Note that this option only makes sense if `:delay_mode` is set to `:regular`.
 
   ## Disabling execution
 
@@ -87,8 +104,8 @@ defmodule Periodic do
 
   ## Logging
 
-  By default, nothing is logged. You can however, turn logging with `:log_level` and `:log_meta` options.
-  See the timeout example for usage.
+  By default, nothing is logged. You can however, turn logging with `:log_level`
+  and `:log_meta` options. See the timeout example for usage.
 
   ## Timeout
 
@@ -132,6 +149,7 @@ defmodule Periodic do
           every: duration,
           initial_delay: duration,
           run: job_spec,
+          delay_mode: :regular | :shifted,
           on_overlap: :run | :ignore | :stop_previous,
           timeout: duration,
           log_level: nil | Logger.level(),
@@ -166,22 +184,23 @@ defmodule Periodic do
 
   @impl GenServer
   def init(opts) do
-    {send_after_fun, opts} = Map.pop(opts, :send_after_fun, &Process.send_after/3)
     state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
-    {initial_delay, state} = Map.pop(state, :initial_delay, Map.fetch!(state, :every))
-    enqueue_next_tick(initial_delay, send_after_fun)
+    {initial_delay, state} = Map.pop(state, :initial_delay, state.every)
+    enqueue_next_tick(initial_delay, state.send_after_fun)
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info({:tick, send_after_fun}, state) do
+  def handle_info(:tick, state) do
+    if state.delay_mode == :regular, do: enqueue_next_tick(state.every, state.send_after_fun)
     handle_tick(state)
-    enqueue_next_tick(state.every, send_after_fun)
     {:noreply, state}
   end
 
   @impl Parent.GenServer
   def handle_child_terminated(_id, _meta, _pid, reason, state) do
+    if state.delay_mode == :shifted, do: enqueue_next_tick(state.every, state.send_after_fun)
+
     case reason do
       :normal -> log(state, "job finished")
       _other -> log(state, "job failed with the reason `#{inspect(reason)}`")
@@ -192,10 +211,12 @@ defmodule Periodic do
 
   defp defaults() do
     %{
+      delay_mode: :regular,
       on_overlap: :run,
       timeout: :infinity,
       log_level: nil,
-      log_meta: []
+      log_meta: [],
+      send_after_fun: &Process.send_after/3
     }
   end
 
@@ -239,7 +260,7 @@ defmodule Periodic do
   defp enqueue_next_tick(:infinity, _send_after_fun), do: :ok
 
   defp enqueue_next_tick(delay, send_after_fun),
-    do: send_after_fun.(self(), {:tick, send_after_fun}, delay)
+    do: send_after_fun.(self(), :tick, delay)
 
   defp log(state, message) do
     if not is_nil(state.log_level), do: Logger.log(state.log_level, message, state.log_meta)

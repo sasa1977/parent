@@ -100,6 +100,19 @@ defmodule PeriodicTest do
     assert_receive {:DOWN, ^mref, :process, ^job_pid, _}
   end
 
+  test "shifted delay_mode" do
+    scheduler_pid = start_test_scheduler(every: 1, delay_mode: :shifted)
+
+    next_tick(scheduler_pid)
+    job_pid = assert_job_started()
+
+    refute_next_tick(scheduler_pid)
+
+    stop_job(job_pid)
+    next_tick(scheduler_pid)
+    assert_job_started()
+  end
+
   test "non-mocked periodical execution" do
     Periodic.start_link(every: 1, run: infinite_job())
     assert_job_started()
