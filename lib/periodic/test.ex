@@ -13,22 +13,24 @@ defmodule Periodic.Test do
   defmacro assert_periodic_event(event, metadata \\ quote(do: _), measurements \\ quote(do: _)) do
     quote do
       assert_receive {
-        unquote(__MODULE__),
-        unquote(event),
-        unquote(metadata),
-        unquote(measurements)
-      }
+                       unquote(__MODULE__),
+                       unquote(event),
+                       unquote(metadata),
+                       unquote(measurements)
+                     },
+                     100
     end
   end
 
   defmacro refute_periodic_event(event, metadata \\ quote(do: _), measurements \\ quote(do: _)) do
     quote do
       refute_receive {
-        unquote(__MODULE__),
-        unquote(event),
-        unquote(metadata),
-        unquote(measurements)
-      }
+                       unquote(__MODULE__),
+                       unquote(event),
+                       unquote(metadata),
+                       unquote(measurements)
+                     },
+                     100
     end
   end
 
