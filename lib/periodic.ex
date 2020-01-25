@@ -250,7 +250,7 @@ defmodule Periodic do
       id: make_ref(),
       start: {Task, :start_link, [fn -> invoke_job(job) end]},
       timeout: state.timeout,
-      shutdown: :brutal_kill
+      shutdown: :timer.seconds(5)
     })
   end
 
