@@ -148,6 +148,7 @@ defmodule Periodic do
   @type opts :: [
           id: term,
           name: GenServer.name(),
+          telemetry_id: term,
           mode: :auto | :manual,
           every: pos_integer,
           initial_delay: non_neg_integer,
@@ -217,12 +218,13 @@ defmodule Periodic do
         :microsecond
       )
 
-    telemetry(state, :finished, %{time: duration}, %{job: pid, reason: reason})
+    telemetry(state, :finished, %{job: pid, reason: reason}, %{time: duration})
     {:noreply, state}
   end
 
   defp defaults() do
     %{
+      telemetry_id: nil,
       mode: :auto,
       delay_mode: :regular,
       on_overlap: :run,
@@ -286,20 +288,19 @@ defmodule Periodic do
     if state.mode == :auto, do: state.send_after_fun.(self(), :tick, delay)
   end
 
+  defp telemetry(state, event, data, measurements \\ %{})
+
   if Mix.env() != :test do
-    defp telemetry(state, :next_tick, _measurements), do: :ok
+    defp telemetry(_state, :next_tick, _data, _measurements), do: :ok
   end
 
-  defp telemetry(state, event, measurements \\ %{}, meta) do
-    data =
-      meta
-      |> Map.merge(Map.take(state, ~w/id name/a))
-      |> Map.merge(%{event: event, scheduler: self()})
+  defp telemetry(%{telemetry_id: nil}, _event, _data, _measurements), do: :ok
 
+  defp telemetry(state, event, data, measurements) do
     :telemetry.execute(
-      [__MODULE__],
+      [__MODULE__, state.telemetry_id, event],
       measurements,
-      data
+      Map.merge(data, %{scheduler: self()})
     )
   end
 end
