@@ -147,6 +147,7 @@ defmodule Periodic do
 
   @type opts :: [
           id: term,
+          name: GenServer.name(),
           every: duration,
           initial_delay: duration,
           run: job_spec,
@@ -161,7 +162,10 @@ defmodule Periodic do
 
   @doc "Starts the periodic executor."
   @spec start_link(opts) :: GenServer.on_start()
-  def start_link(opts), do: Parent.GenServer.start_link(__MODULE__, normalize_opts(opts))
+  def start_link(opts) do
+    gen_server_opts = Keyword.take(opts, [:name])
+    Parent.GenServer.start_link(__MODULE__, normalize_opts(opts), gen_server_opts)
+  end
 
   defp normalize_opts(opts) do
     opts = Map.new(opts)
