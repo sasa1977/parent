@@ -154,7 +154,8 @@ defmodule Periodic do
           run: job_spec,
           delay_mode: :regular | :shifted,
           on_overlap: :run | :ignore | :stop_previous,
-          timeout: pos_integer | :infinity
+          timeout: pos_integer | :infinity,
+          job_shutdown: :brutal_kill | :infinity | non_neg_integer()
         ]
   @type job_spec :: (() -> term) | {module, atom, [term]}
 
@@ -228,7 +229,8 @@ defmodule Periodic do
       timeout: :infinity,
       log_level: nil,
       log_meta: [],
-      send_after_fun: &Process.send_after/3
+      send_after_fun: &Process.send_after/3,
+      job_shutdown: :timer.seconds(5)
     }
   end
 
@@ -270,7 +272,7 @@ defmodule Periodic do
              id: make_ref(),
              start: {Task, :start_link, [fn -> invoke_job(job) end]},
              timeout: state.timeout,
-             shutdown: :timer.seconds(5),
+             shutdown: state.job_shutdown,
              meta: %{started_at: :erlang.monotonic_time()}
            }),
          do: telemetry(state, :started, %{job: pid})
