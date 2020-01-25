@@ -148,16 +148,14 @@ defmodule Periodic do
   @type opts :: [
           id: term,
           name: GenServer.name(),
-          every: duration,
-          initial_delay: duration,
+          mode: :auto | :manual,
+          every: pos_integer,
+          initial_delay: non_neg_integer,
           run: job_spec,
           delay_mode: :regular | :shifted,
           on_overlap: :run | :ignore | :stop_previous,
-          timeout: duration,
-          log_level: nil | Logger.level(),
-          log_meta: Keyword.t()
+          timeout: pos_integer | :infinity
         ]
-  @type duration :: pos_integer | :infinity
   @type job_spec :: (() -> term) | {module, atom, [term]}
 
   @doc "Starts the periodic executor."
@@ -191,20 +189,25 @@ defmodule Periodic do
   def init(opts) do
     state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
     {initial_delay, state} = Map.pop(state, :initial_delay, state.every)
-    enqueue_next_tick(initial_delay, state.send_after_fun)
+    enqueue_next_tick(state, initial_delay)
     {:ok, state}
   end
 
   @impl GenServer
   def handle_info(:tick, state) do
-    if state.delay_mode == :regular, do: enqueue_next_tick(state.every, state.send_after_fun)
     handle_tick(state)
     {:noreply, state}
   end
 
+  @impl GenServer
+  def handle_call(:tick, _from, %{mode: :manual} = state) do
+    handle_tick(state)
+    {:reply, :ok, state}
+  end
+
   @impl Parent.GenServer
   def handle_child_terminated(_id, meta, pid, reason, state) do
-    if state.delay_mode == :shifted, do: enqueue_next_tick(state.every, state.send_after_fun)
+    if state.delay_mode == :shifted, do: enqueue_next_tick(state, state.every)
 
     duration =
       :erlang.convert_time_unit(
@@ -219,6 +222,7 @@ defmodule Periodic do
 
   defp defaults() do
     %{
+      mode: :auto,
       delay_mode: :regular,
       on_overlap: :run,
       timeout: :infinity,
@@ -229,26 +233,34 @@ defmodule Periodic do
   end
 
   defp handle_tick(state) do
+    if state.delay_mode == :regular, do: enqueue_next_tick(state, state.every)
+
     case state.on_overlap do
       :run ->
         start_job(state)
 
       :ignore ->
-        if previous_instances_running?(),
-          do: telemetry(state, :skipped, %{}),
-          else: start_job(state)
+        case previous_instance() do
+          {:ok, pid} -> telemetry(state, :skipped, %{still_running: pid})
+          :error -> start_job(state)
+        end
 
       :stop_previous ->
-        if previous_instances_running?() do
+        with {:ok, pid} <- previous_instance() do
           Parent.GenServer.shutdown_all(:kill)
-          telemetry(state, :killed_previous, %{})
+          telemetry(state, :killed_previous, %{pid: pid})
         end
 
         start_job(state)
     end
   end
 
-  defp previous_instances_running?(), do: Parent.GenServer.num_children() > 0
+  defp previous_instance() do
+    case Parent.GenServer.children() do
+      [{_id, pid, _meta}] -> {:ok, pid}
+      [] -> :error
+    end
+  end
 
   defp start_job(state) do
     job = state.run
@@ -267,10 +279,14 @@ defmodule Periodic do
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
 
-  defp enqueue_next_tick(:infinity, _send_after_fun), do: :ok
+  defp enqueue_next_tick(state, delay) do
+    telemetry(state, :next_tick, %{in: delay})
+    if state.mode == :auto, do: state.send_after_fun.(self(), :tick, delay)
+  end
 
-  defp enqueue_next_tick(delay, send_after_fun),
-    do: send_after_fun.(self(), :tick, delay)
+  if Mix.env() != :test do
+    defp telemetry(state, :next_tick, _measurements), do: :ok
+  end
 
   defp telemetry(state, event, measurements \\ %{}, meta) do
     data =

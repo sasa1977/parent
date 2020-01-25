@@ -1,190 +1,153 @@
 defmodule PeriodicTest do
   use ExUnit.Case, async: true
+  import Periodic.Test
 
   setup do
-    num = :erlang.unique_integer([:positive, :monotonic])
-
-    :telemetry.attach(
-      :foo,
-      [Periodic],
-      fn event_name, event_measurements, event_metadata, handler_config ->
-        IO.inspect(event_metadata)
-      end,
-      nil
-    )
-
-    on_exit(fn -> :telemetry.detach(:foo) end)
-
-    :ok
+    observe()
   end
 
-  test "ticking with initial delay" do
-    scheduler_pid = start_test_scheduler(initial_delay: 1, every: 2)
-
-    assert next_tick(scheduler_pid).time_passed == 1
-    assert next_tick(scheduler_pid).time_passed == 2
-    assert next_tick(scheduler_pid).time_passed == 2
+  test "auto mode" do
+    test_pid = self()
+    Periodic.start_link(every: 1, run: fn -> send(test_pid, :started) end)
+    assert_receive :started
+    assert_receive :started
   end
 
-  test "ticking without initial delay" do
-    scheduler_pid = start_test_scheduler(every: 2)
+  test "regular job execution" do
+    scheduler = start_job!()
 
-    assert next_tick(scheduler_pid).time_passed == 2
-    assert next_tick(scheduler_pid).time_passed == 2
+    refute_periodic_event(%{scheduler: ^scheduler, event: :started})
+    tick(scheduler)
+    assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+    assert_receive {:started, ^job}
+
+    refute_periodic_event(%{scheduler: ^scheduler, event: :started})
+    tick(scheduler)
+    assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+    assert_receive {:started, ^job}
   end
 
-  test "nothing is executed if initial delay is infinity" do
-    scheduler_pid = start_test_scheduler(initial_delay: :infinity, every: 2)
-    refute_next_tick(scheduler_pid)
+  test "finished telemetry event" do
+    scheduler = start_job!()
+    tick(scheduler)
+    assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+
+    finish_job(job)
+    assert_periodic_event(%{scheduler: ^scheduler, event: :finished, job: ^job}, %{time: time})
+    assert is_integer(time) and time > 0
   end
 
-  test "each job is started in a separate process" do
-    scheduler_pid = start_test_scheduler(every: 1)
+  describe "on_overlap" do
+    test "ignore" do
+      scheduler = start_job!(on_overlap: :ignore)
 
-    next_tick(scheduler_pid)
-    job_pid_1 = assert_job_started()
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+      assert_receive {:started, ^job}
 
-    next_tick(scheduler_pid)
-    job_pid_2 = assert_job_started()
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :skipped, still_running: ^job})
+      refute_periodic_event(%{scheduler: ^scheduler, event: :started})
+      refute_received {:started, _}
 
-    assert job_pid_1 != scheduler_pid
-    assert job_pid_2 != scheduler_pid
-    assert job_pid_1 != job_pid_2
-  end
+      finish_job(job)
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+      assert_receive {:started, ^job}
+    end
 
-  test "job is started on every interval if overlapping is allowed" do
-    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :run)
+    test "stop_previous" do
+      scheduler = start_job!(on_overlap: :stop_previous)
 
-    next_tick(scheduler_pid)
-    assert_job_started()
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+      assert_receive {:started, ^job}
+      mref = Process.monitor(job)
 
-    next_tick(scheduler_pid)
-    assert_job_started()
-  end
-
-  test "overlap is true by default" do
-    scheduler_pid = start_test_scheduler(every: 1)
-
-    next_tick(scheduler_pid)
-    assert_job_started()
-
-    next_tick(scheduler_pid)
-    assert_job_started()
-  end
-
-  test "only one instance of job can run if overlapping is not allowed" do
-    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :ignore)
-
-    next_tick(scheduler_pid)
-    assert_job_started()
-
-    next_tick(scheduler_pid)
-    refute_job_started()
-  end
-
-  test "previous instance of job is terminated if brutally killed is set to stop_previous" do
-    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :stop_previous)
-
-    next_tick(scheduler_pid)
-    first_instance = assert_job_started()
-    mref = Process.monitor(first_instance)
-
-    next_tick(scheduler_pid)
-    assert_job_started()
-
-    assert_receive {:DOWN, ^mref, :process, ^first_instance, :killed}
-  end
-
-  test "if overlapping is not allowed, next job is started after the previous one is done" do
-    scheduler_pid = start_test_scheduler(every: 1, on_overlap: :run)
-
-    next_tick(scheduler_pid)
-    job_pid = assert_job_started()
-
-    stop_job(job_pid)
-    next_tick(scheduler_pid)
-
-    assert_job_started()
-  end
-
-  test "job is killed if it times out" do
-    scheduler_pid = start_test_scheduler(every: 1, timeout: 10)
-
-    next_tick(scheduler_pid)
-    job_pid = assert_job_started()
-
-    mref = Process.monitor(job_pid)
-    assert_receive {:DOWN, ^mref, :process, ^job_pid, _}
-  end
-
-  test "shifted delay_mode" do
-    scheduler_pid = start_test_scheduler(every: 1, delay_mode: :shifted)
-
-    next_tick(scheduler_pid)
-    job_pid = assert_job_started()
-
-    refute_next_tick(scheduler_pid)
-
-    stop_job(job_pid)
-    next_tick(scheduler_pid)
-    assert_job_started()
-  end
-
-  test "non-mocked periodical execution" do
-    Periodic.start_link(every: 1, run: infinite_job())
-    assert_job_started()
-    assert_job_started()
-  end
-
-  defp start_test_scheduler(opts) do
-    opts = Keyword.merge(opts, send_after_fun: test_send_after(), run: infinite_job())
-    assert {:ok, scheduler_pid} = Periodic.start_link(opts)
-    scheduler_pid
-  end
-
-  defp test_send_after() do
-    test_process = self()
-
-    fn pid, msg, delay ->
-      send(test_process, {:send_after, %{pid: pid, msg: msg, delay: delay}})
+      tick(scheduler)
+      assert_receive({:DOWN, ^mref, :process, ^job, :killed})
+      assert_periodic_event(%{scheduler: ^scheduler, event: :killed_previous, pid: ^job})
+      assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+      assert_receive {:started, ^job}
     end
   end
 
-  defp current_tick(scheduler_pid) do
-    assert_receive {:send_after, %{pid: ^scheduler_pid} = send_after_data}
-    send_after_data
+  test "timeout" do
+    scheduler = start_job!(timeout: 1)
+    tick(scheduler)
+    assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+    mref = Process.monitor(job)
+    assert_receive({:DOWN, ^mref, :process, ^job, :killed})
   end
 
-  defp refute_next_tick(scheduler_pid), do: refute_receive({:send_after, %{pid: ^scheduler_pid}})
+  describe "initial_delay" do
+    test "is by default equal to the interval" do
+      scheduler = start_job!(every: 100)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 100})
+    end
 
-  defp next_tick(scheduler_pid) do
-    current_tick = current_tick(scheduler_pid)
-    send(scheduler_pid, current_tick.msg)
-    %{time_passed: current_tick.delay}
+    test "overrides the first tick interval" do
+      scheduler = start_job!(every: 100, initial_delay: 0)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 0})
+
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 100})
+    end
   end
 
-  defp infinite_job() do
-    owner = self()
+  describe "delay_mode" do
+    test "regular" do
+      scheduler = start_job!(delay_mode: :regular, every: 100)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 100})
+
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 100})
+
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 100})
+    end
+
+    test "shifted" do
+      scheduler = start_job!(delay_mode: :shifted, every: 100)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 100})
+
+      tick(scheduler)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :started, job: job})
+      refute_periodic_event(%{scheduler: ^scheduler, event: :next_tick})
+
+      finish_job(job)
+      assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, in: 100})
+    end
+  end
+
+  test "registered name" do
+    scheduler = start_job!(name: :registered_name)
+    assert Process.whereis(:registered_name) == scheduler
+    assert_periodic_event(%{scheduler: ^scheduler, event: :next_tick, name: :registered_name})
+  end
+
+  defp start_job!(opts \\ []) do
+    defaults = [id: :test_job, every: 1, mode: :manual, run: instrumented_job()]
+    {:ok, pid} = start_supervised({Periodic, Keyword.merge(defaults, opts)})
+    pid
+  end
+
+  defp instrumented_job() do
+    test_pid = self()
 
     fn ->
-      send(owner, {:test_job_started, self()})
+      send(test_pid, {:started, self()})
 
       receive do
-        :continue -> :ok
+        :finish -> :ok
       end
     end
   end
 
-  defp assert_job_started() do
-    assert_receive {:test_job_started, pid}
-    pid
-  end
-
-  defp refute_job_started(), do: refute_receive({:test_job_started, _pid})
-
-  defp stop_job(job_pid) do
-    mref = Process.monitor(job_pid)
-    Process.exit(job_pid, :kill)
-    assert_receive {:DOWN, ^mref, :process, pid, _reason}
+  defp finish_job(job) do
+    mref = Process.monitor(job)
+    send(job, :finish)
+    assert_receive {:DOWN, ^mref, :process, ^job, _}
+    :ok
   end
 end
