@@ -203,14 +203,17 @@ defmodule Periodic do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(_id, _meta, _pid, reason, state) do
+  def handle_child_terminated(_id, meta, pid, reason, state) do
     if state.delay_mode == :shifted, do: enqueue_next_tick(state.every, state.send_after_fun)
 
-    case reason do
-      :normal -> log(state, "job finished")
-      _other -> log(state, "job failed with the reason `#{inspect(reason)}`")
-    end
+    duration =
+      :erlang.convert_time_unit(
+        :erlang.monotonic_time() - meta.started_at,
+        :native,
+        :microsecond
+      )
 
+    telemetry(state, :finished, %{time: duration}, %{job: pid, reason: reason})
     {:noreply, state}
   end
 
@@ -232,13 +235,13 @@ defmodule Periodic do
 
       :ignore ->
         if previous_instances_running?(),
-          do: log(state, "previous job still running, not starting another instance"),
+          do: telemetry(state, :skipped, %{}),
           else: start_job(state)
 
       :stop_previous ->
         if previous_instances_running?() do
-          log(state, "terminating previous jobs")
           Parent.GenServer.shutdown_all(:kill)
+          telemetry(state, :killed_previous, %{})
         end
 
         start_job(state)
@@ -248,15 +251,17 @@ defmodule Periodic do
   defp previous_instances_running?(), do: Parent.GenServer.num_children() > 0
 
   defp start_job(state) do
-    log(state, "starting the job")
     job = state.run
 
-    Parent.GenServer.start_child(%{
-      id: make_ref(),
-      start: {Task, :start_link, [fn -> invoke_job(job) end]},
-      timeout: state.timeout,
-      shutdown: :timer.seconds(5)
-    })
+    with {:ok, pid} <-
+           Parent.GenServer.start_child(%{
+             id: make_ref(),
+             start: {Task, :start_link, [fn -> invoke_job(job) end]},
+             timeout: state.timeout,
+             shutdown: :timer.seconds(5),
+             meta: %{started_at: :erlang.monotonic_time()}
+           }),
+         do: telemetry(state, :started, %{job: pid})
   end
 
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
@@ -267,7 +272,16 @@ defmodule Periodic do
   defp enqueue_next_tick(delay, send_after_fun),
     do: send_after_fun.(self(), :tick, delay)
 
-  defp log(state, message) do
-    if not is_nil(state.log_level), do: Logger.log(state.log_level, message, state.log_meta)
+  defp telemetry(state, event, measurements \\ %{}, meta) do
+    data =
+      meta
+      |> Map.merge(Map.take(state, ~w/id name/a))
+      |> Map.merge(%{event: event, scheduler: self()})
+
+    :telemetry.execute(
+      [__MODULE__],
+      measurements,
+      data
+    )
   end
 end

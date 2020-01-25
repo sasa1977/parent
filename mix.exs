@@ -27,7 +27,8 @@ defmodule Parent.MixProject do
     [
       {:dialyxir, "~> 0.5", runtime: false, only: [:dev, :test]},
       {:ex_doc, "~> #{ex_doc_version()}", only: :dev, runtime: false},
-      {:stream_data, "~> 0.4", only: [:dev, :test]}
+      {:stream_data, "~> 0.4", only: [:dev, :test]},
+      {:telemetry, "~> 0.4"}
     ]
   end
 

@@ -1,6 +1,23 @@
 defmodule PeriodicTest do
   use ExUnit.Case, async: true
 
+  setup do
+    num = :erlang.unique_integer([:positive, :monotonic])
+
+    :telemetry.attach(
+      :foo,
+      [Periodic],
+      fn event_name, event_measurements, event_metadata, handler_config ->
+        IO.inspect(event_metadata)
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(:foo) end)
+
+    :ok
+  end
+
   test "ticking with initial delay" do
     scheduler_pid = start_test_scheduler(initial_delay: 1, every: 2)
 
