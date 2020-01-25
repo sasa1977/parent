@@ -90,10 +90,11 @@ defmodule Periodic do
   following values:
 
     - `:run` - The new job instance is always started. This is the default value.
-    - `:ignore` - new job instance is not started if the previous one is
-                  still running
-    - `:stop_previous` - previous job instances are terminated before the new
-                          one is started
+    - `:ignore` - New job instance is not started if the previous one is
+                  still running.
+    - `:stop_previous` - Previous job instances are terminated before the new
+                         one is started. In this case, the previous job will be
+                         brutally killed.
 
   Note that this option only makes sense if `:delay_mode` is set to `:regular`.
 
@@ -233,7 +234,7 @@ defmodule Periodic do
       :stop_previous ->
         if previous_instances_running?() do
           log(state, "terminating previous jobs")
-          Parent.GenServer.shutdown_all()
+          Parent.GenServer.shutdown_all(:kill)
         end
 
         start_job(state)

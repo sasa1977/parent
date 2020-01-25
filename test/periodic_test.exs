@@ -65,7 +65,7 @@ defmodule PeriodicTest do
     refute_job_started()
   end
 
-  test "previous instance of job is terminated if overlapping is set to stop_previous" do
+  test "previous instance of job is terminated if brutally killed is set to stop_previous" do
     scheduler_pid = start_test_scheduler(every: 1, on_overlap: :stop_previous)
 
     next_tick(scheduler_pid)
@@ -75,7 +75,7 @@ defmodule PeriodicTest do
     next_tick(scheduler_pid)
     assert_job_started()
 
-    assert_receive {:DOWN, ^mref, :process, ^first_instance, :shutdown}
+    assert_receive {:DOWN, ^mref, :process, ^first_instance, :killed}
   end
 
   test "if overlapping is not allowed, next job is started after the previous one is done" do
