@@ -172,10 +172,10 @@ defmodule Periodic do
         test "my periodic job" do
           bring_the_system_into_the_desired_state()
 
-          Periodic.Test.tick(scheduler_name)
+          Periodic.Test.tick(MyPeriodicJob)
 
           # wait for the job to finish successfully
-          Periodic.Test.assert_periodic_event(:finished, %{reason: :normal})
+          Periodic.Test.assert_periodic_event(MyPeriodicJob, :finished, %{reason: :normal})
 
           verify_side_effect_of_the_job()
         end

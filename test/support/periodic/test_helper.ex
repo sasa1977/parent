@@ -19,7 +19,7 @@ defmodule Periodic.TestHelper do
   def start_job!(opts \\ []) do
     scheduler = start_scheduler!(opts)
     tick(scheduler)
-    assert_periodic_event(:started, %{scheduler: ^scheduler, job: job})
+    assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
     {scheduler, job}
   end
 

@@ -25,7 +25,7 @@ defmodule Periodic.LoggerTest do
         capture_log(fn ->
           {_scheduler, job} = start_job!()
           finish_job(job)
-          assert_periodic_event(:finished, %{job: ^job})
+          assert_periodic_event(:test_job, :finished, %{job: ^job})
         end)
 
       assert message =~ ~r/Periodic\(:test_job\): job #PID<.+> finished, duration=\d+us/
@@ -36,7 +36,7 @@ defmodule Periodic.LoggerTest do
         capture_log(fn ->
           {_scheduler, job} = start_job!()
           Process.exit(job, :shutdown)
-          assert_periodic_event(:finished, %{job: ^job})
+          assert_periodic_event(:test_job, :finished, %{job: ^job})
         end)
 
       assert message =~ ~r/Periodic\(:test_job\): job #PID<.+> shut down/
@@ -47,7 +47,7 @@ defmodule Periodic.LoggerTest do
         capture_log(fn ->
           {_scheduler, job} = start_job!()
           Process.exit(job, :kill)
-          assert_periodic_event(:finished, %{job: ^job})
+          assert_periodic_event(:test_job, :finished, %{job: ^job})
         end)
 
       assert message =~ ~r/Periodic\(:test_job\): job #PID<.+> killed/
@@ -58,7 +58,7 @@ defmodule Periodic.LoggerTest do
         capture_log(fn ->
           {_scheduler, job} = start_job!()
           send(job, {:crash, :some_reason})
-          assert_periodic_event(:finished, %{job: ^job})
+          assert_periodic_event(:test_job, :finished, %{job: ^job})
         end)
 
       assert message =~ ~r/Periodic\(:test_job\): job #PID<.+> exited with reason :some_reason/
@@ -70,7 +70,7 @@ defmodule Periodic.LoggerTest do
       capture_log(fn ->
         {scheduler, _job} = start_job!(on_overlap: :ignore)
         tick(scheduler)
-        assert_periodic_event(:skipped, %{scheduler: ^scheduler})
+        assert_periodic_event(:test_job, :skipped, %{scheduler: ^scheduler})
       end)
 
     assert message =~ "skipped starting the job because the previous instance is still running"

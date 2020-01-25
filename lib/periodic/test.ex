@@ -10,10 +10,16 @@ defmodule Periodic.Test do
   def observe(telemetry_id),
     do: Enum.each(@telemetry_events, &attach_telemetry_handler(telemetry_id, &1))
 
-  defmacro assert_periodic_event(event, metadata \\ quote(do: _), measurements \\ quote(do: _)) do
+  defmacro assert_periodic_event(
+             telemetry_id,
+             event,
+             metadata \\ quote(do: _),
+             measurements \\ quote(do: _)
+           ) do
     quote do
       assert_receive {
                        unquote(__MODULE__),
+                       unquote(telemetry_id),
                        unquote(event),
                        unquote(metadata),
                        unquote(measurements)
@@ -22,10 +28,16 @@ defmodule Periodic.Test do
     end
   end
 
-  defmacro refute_periodic_event(event, metadata \\ quote(do: _), measurements \\ quote(do: _)) do
+  defmacro refute_periodic_event(
+             telemetry_id,
+             event,
+             metadata \\ quote(do: _),
+             measurements \\ quote(do: _)
+           ) do
     quote do
       refute_receive {
                        unquote(__MODULE__),
+                       unquote(telemetry_id),
                        unquote(event),
                        unquote(metadata),
                        unquote(measurements)
@@ -44,8 +56,8 @@ defmodule Periodic.Test do
   defp telemetry_handler(event_name) do
     test_pid = self()
 
-    fn [Periodic, _id, event] = ^event_name, measurements, metadata, nil ->
-      send(test_pid, {__MODULE__, event, metadata, measurements})
+    fn [Periodic, telemetry_id, event] = ^event_name, measurements, metadata, nil ->
+      send(test_pid, {__MODULE__, telemetry_id, event, metadata, measurements})
     end
   end
 end

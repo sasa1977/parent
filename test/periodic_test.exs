@@ -17,21 +17,23 @@ defmodule PeriodicTest do
   test "regular job execution" do
     scheduler = start_scheduler!()
 
-    refute_periodic_event(:started, %{scheduler: ^scheduler})
+    refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
     tick(scheduler)
-    assert_periodic_event(:started, %{scheduler: ^scheduler, job: job})
+    assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
     assert_receive {:started, ^job}
 
-    refute_periodic_event(:started, %{scheduler: ^scheduler})
+    refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
     tick(scheduler)
-    assert_periodic_event(:started, %{scheduler: ^scheduler, job: job})
+    assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
     assert_receive {:started, ^job}
   end
 
   test "finished telemetry event" do
     {scheduler, job} = start_job!()
     finish_job(job)
-    assert_periodic_event(:finished, %{scheduler: ^scheduler, job: ^job}, %{time: time})
+
+    assert_periodic_event(:test_job, :finished, %{scheduler: ^scheduler, job: ^job}, %{time: time})
+
     assert is_integer(time) and time > 0
   end
 
@@ -40,12 +42,12 @@ defmodule PeriodicTest do
       {scheduler, job} = start_job!(on_overlap: :ignore)
 
       tick(scheduler)
-      assert_periodic_event(:skipped, %{scheduler: ^scheduler, still_running: ^job})
-      refute_periodic_event(:started, %{scheduler: ^scheduler})
+      assert_periodic_event(:test_job, :skipped, %{scheduler: ^scheduler, still_running: ^job})
+      refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
 
       finish_job(job)
       tick(scheduler)
-      assert_periodic_event(:started, %{scheduler: ^scheduler, job: job})
+      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
     end
 
     test "stop_previous" do
@@ -55,8 +57,8 @@ defmodule PeriodicTest do
 
       tick(scheduler)
       assert_receive({:DOWN, ^mref, :process, ^job, :killed})
-      assert_periodic_event(:stopped_previous, %{scheduler: ^scheduler, pid: ^job})
-      assert_periodic_event(:started, %{scheduler: ^scheduler, job: job})
+      assert_periodic_event(:test_job, :stopped_previous, %{scheduler: ^scheduler, pid: ^job})
+      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
     end
   end
 
@@ -69,40 +71,40 @@ defmodule PeriodicTest do
   describe "initial_delay" do
     test "is by default equal to the interval" do
       scheduler = start_scheduler!(every: 100)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 100})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 100})
     end
 
     test "overrides the first tick interval" do
       scheduler = start_scheduler!(every: 100, initial_delay: 0)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 0})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 0})
 
       tick(scheduler)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 100})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 100})
     end
   end
 
   describe "delay_mode" do
     test "regular" do
       scheduler = start_scheduler!(delay_mode: :regular, every: 100)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 100})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 100})
 
       tick(scheduler)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 100})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 100})
 
       tick(scheduler)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 100})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 100})
     end
 
     test "shifted" do
       scheduler = start_scheduler!(delay_mode: :shifted, every: 100)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 100})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 100})
 
       tick(scheduler)
-      assert_periodic_event(:started, %{scheduler: ^scheduler, job: job})
-      refute_periodic_event(:next_tick, %{scheduler: ^scheduler})
+      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
+      refute_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler})
 
       finish_job(job)
-      assert_periodic_event(:next_tick, %{scheduler: ^scheduler, in: 100})
+      assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler, in: 100})
     end
   end
 
@@ -147,6 +149,6 @@ defmodule PeriodicTest do
   test "registered name" do
     scheduler = start_scheduler!(name: :registered_name)
     assert Process.whereis(:registered_name) == scheduler
-    assert_periodic_event(:next_tick, %{scheduler: ^scheduler})
+    assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler})
   end
 end
