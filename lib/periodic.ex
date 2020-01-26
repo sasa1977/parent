@@ -278,19 +278,7 @@ defmodule Periodic do
   @spec start_link(opts) :: GenServer.on_start()
   def start_link(opts) do
     gen_server_opts = Keyword.take(opts, [:name])
-    Parent.GenServer.start_link(__MODULE__, normalize_opts(opts), gen_server_opts)
-  end
-
-  defp normalize_opts(opts) do
-    opts = Map.new(opts)
-
-    with %{overlap?: overlap?} <- opts do
-      Logger.warn("The `:overlap?` option is deprecated, use `:on_overlap` instead.")
-
-      opts
-      |> Map.put(:on_overlap, if(overlap?, do: :run, else: :ignore))
-      |> Map.delete(:overlap?)
-    end
+    Parent.GenServer.start_link(__MODULE__, Map.new(opts), gen_server_opts)
   end
 
   @doc "Builds a child specification for starting the periodic executor."
