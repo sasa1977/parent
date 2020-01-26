@@ -1,5 +1,5 @@
 defmodule Periodic.Test do
-  public_telemetry_events = ~w/started finished skipped killed_previous/a
+  public_telemetry_events = ~w/started finished skipped stopped_previous/a
 
   @telemetry_events if Mix.env() != :test,
                       do: public_telemetry_events,

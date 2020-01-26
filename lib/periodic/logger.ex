@@ -3,7 +3,7 @@ defmodule Periodic.Logger do
 
   def install(telemetry_id) do
     Enum.each(
-      ~w/started finished skipped killed_previous/a,
+      ~w/started finished skipped stopped_previous/a,
       &attach_telemetry_handler(telemetry_id, &1)
     )
   end
@@ -20,7 +20,7 @@ defmodule Periodic.Logger do
 
   defp log_level(:started, _meta), do: :info
   defp log_level(:skipped, _meta), do: :info
-  defp log_level(:killed_previous, _meta), do: :warn
+  defp log_level(:stopped_previous, _meta), do: :warn
 
   defp log_level(:finished, meta),
     do: if(meta.reason in [:shutdown, :normal], do: :info, else: :error)
@@ -47,6 +47,6 @@ defmodule Periodic.Logger do
   defp message(:skipped, _meta, _measurements),
     do: "skipped starting the job because the previous instance is still running"
 
-  defp message(:killed_previous, _meta, _measurements),
+  defp message(:stopped_previous, _meta, _measurements),
     do: "killed previous job instance, because the new job is about to be started"
 end

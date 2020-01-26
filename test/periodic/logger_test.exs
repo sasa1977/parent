@@ -76,7 +76,7 @@ defmodule Periodic.LoggerTest do
     assert message =~ "skipped starting the job because the previous instance is still running"
   end
 
-  test "killed_previous" do
+  test "stopped_previous" do
     message =
       capture_log(fn ->
         {scheduler, _job} = start_job!(on_overlap: :stop_previous)

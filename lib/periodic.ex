@@ -2,145 +2,184 @@ defmodule Periodic do
   @moduledoc """
   Periodic job execution.
 
-  This module can be used when you need to periodically run some code in a
-  separate process.
+  This module can be used when you need to periodically run some job.
 
-  To setup the job execution, you can include the child_spec in your supervision
-  tree. The childspec has the following shape:
+  ## Quick start
 
-  ```
-  {Periodic, run: mfa_or_zero_arity_lambda, every: interval}
-  ```
+  It is recommended (but not mandatory!) to define a dedicated module for the job. For example:
 
-  For example:
+      defmodule MySystem.Cleanup do
+        def child_spec(_arg) do
+          Periodic.child_spec(
+            id: __MODULE__,
+            run: &cleanup/0,
+            every: :timer.hours(1)
+          )
+        end
 
-  ```
-  Supervisor.start_link(
-    [{Periodic, run: {IO, :puts, ["Hello, World!"]}, every: :timer.seconds(1)}],
-    strategy: :one_for_one
-  )
+        defp cleanup(), do: # ...
+      end
 
-  Hello, World!   # after one second
-  Hello, World!   # after two seconds
-  ...
-  ```
+  With such module implemented, you can place the job in the desired place in the supervision tree:
 
-  By default the first execution will occur after the `every` interval. To override this
-  you can set the `initial_delay` option:
+      Supervisor.start_link(
+        [
+          MySystem.Cleanup,
+          # ...
+        ],
+        # ...
+      )
 
-  ```
-  Supervisor.start_link(
-    [
-      {Periodic,
-       run: {IO, :puts, ["Hello, World!"]},
-       initial_delay: :timer.seconds(1),
-       every: :timer.seconds(10)}
-    ],
-    strategy: :one_for_one
-  )
+  You can of course start multiple periodic jobs in the system, and they don't have to be the
+  children of the same supervisor. You're advised to place the job in the proper part of the
+  supervision tree. For example, a database cleanup job should share the ancestor with the
+  repo, while a periodic job working with Phoenix channels should share the ancestor with the
+  endpoint.
 
-  Hello, World!   # after one second
-  Hello, World!   # after ten seconds
-  ```
+  As mentioned, you don't need to create a dedicated module to run a job. It's also possible to
+  provide `{Periodic, opts}` in the supervisor child list. Finally, if you need more runtime
+  flexibility, you can also start the job with `start_link/1`.
 
-  ## Multiple children under the same supervisor
+  ## Process structure
 
-  You can start multiple periodic tasks under the same supervisor. However,
-  in this case you need to provide a unique id for each task, which is used as
-  the supervisor child id:
+  The process started with `start_link` is called the _scheduler_. This is the process which
+  regularly "ticks" in the given interval and executes the _job_. The job is running in a separate
+  one-off process, which is the child of the scheduler. When the job is done, the job process
+  stops. Therefore, each execution is taking place in a separate process.
 
-  ```
-  Supervisor.start_link(
-    [
-      {Periodic, id: :job1, run: {IO, :puts, ["Hi!"]}, every: :timer.seconds(1)},
-      {Periodic, id: :job2, run: {IO, :puts, ["Hello!"]}, every: :timer.seconds(2)}
-    ],
-    strategy: :one_for_one
-  )
+  Depending on the overlapping mode (see `:on_overlap` option), it is possible that multiple
+  instances of the same job are running simultaneously.
 
-  Hi!
-  Hello!
-  Hi!
-  Hi!
-  Hello!
-  ...
-  ```
+  No other processes are started.
 
-  ## Delay mode
+  ## Options
 
-  The `:delay_mode` option can be used to configure how the `:every` option is
-  interpreted. It can have the following values:
+  - `:run` (required) - Zero arity function or MFA.
+  - `:every` (required) - Time in milliseconds between two consecutive job executions (see
+    `:delay_mode` option for details).
+  - `:initial_delay` - Time in milliseconds before the first execution of the job. If not provided,
+    the default value of `:every` is used. In other words, the first execution will by default
+    take place after the desired interval has passed.
+  - `:delay_mode` - Controls how the `:every` interval is interpreted. Following options are possible:
+      - `:regular` (default) - `:every` represents the time between two consecutive starts
+      - `:shifted` - `:every` represents the time between the termination of the previous
+      and the start of the next instance.
+  - `:on_overlap` - Defines the desired behaviour when the job is about to be started while the
+    previous instance is still running.
+      - `:run` (default) - always start the new job
+      - `:ignore` - don't start the new job if the previous instance is still running
+      - `:stop_previous` - stop the previous instance before starting the new one
+  - `:timeout` - Defines the maximum running time of the job. If the job runs for longer than that,
+    it is forcefully terminated. In this case, the job's shutdown specification is ignored.
+    Defaults to `:infinity`
+  - `:job_shutdown` - Shutdown value of the job process. See the "Shutdown" section
+    for details.
+  - `:id` - Supervisor child id of the scheduler process. Defaults to `Periodic`. If you plan on
+    running multiple periodic jobs under the same supervisor, make sure that they have different
+    id values.
+  - `:name` - Registered name of the scheduler process. If not provided, the process will not be
+    registered.
+  - `:telemetry_id` - Id used in telemetry event names. See the "Telemetry" section for more
+    details. If not provided, telemetry events won't be emitted.
+  - `:mode` - When set to `:manual`, doesn't start jobs automatically, but instead relies on the
+    external ticking mechanism. This should be used only in `:test` mix environment. See
+    the "Testing" section for details.
 
-    - `:regular` - The `:every` option represents the time between two
-                   consecutive starts of the job. This is the default value.
-    - `:shifted` - The `:every` option represents the time between the
-                   termination of the job and the start of the next instance.
-
-  Keep in mind that, regardless of the delay mode, `Periodic` doesn't attempt
-  to correct a time skew between executions. Even in the regular mode, the
-  delay between two consecutive jobs might be higher than specified, for example
-  if the system is overloaded. If such higher delay happens, it will not be
-  compensated for.
-
-  ## Overlapped execution
-
-  By default, the jobs are running as overlapped. This means that a new job
-  instance will be started even if the previous one is not running. If you want
-  to change that, you can use the `:on_overlap` option which can have the
-  following values:
-
-    - `:run` - The new job instance is always started. This is the default value.
-    - `:ignore` - New job instance is not started if the previous one is
-                  still running.
-    - `:stop_previous` - Previous job instances are terminated before the new
-                         one is started. In this case, the previous job will be
-                         brutally killed.
-
-  Note that this option only makes sense if `:delay_mode` is set to `:regular`.
-
-  ## Disabling execution
-
-  If you pass the `:infinity` as the timeout value, the job will not be executed.
-  This can be useful to disable the job in some environments (e.g. in `:test`).
-
-  ## Logging
-
-  By default, nothing is logged. You can however, turn logging with `:log_level`
-  and `:log_meta` options. See the timeout example for usage.
-
-  ## Timeout
-
-  You can also pass the :timeout option:
-
-  ```
-  Supervisor.start_link(
-    [
-      {Periodic,
-        run: {Process, :sleep, [:infinity]}, every: :timer.seconds(1),
-        overlap?: false,
-        timeout: :timer.seconds(2),
-        strategy: :one_for_one,
-        log_level: :debug,
-        log_meta: [job_id: :my_job]
-      }
-    ],
-    strategy: :one_for_one
-  )
-
-  job_id=my_job [debug] starting the job
-  job_id=my_job [debug] previous job still running, not starting another instance
-  job_id=my_job [debug] job failed with the reason `:timeout`
-  job_id=my_job [debug] starting the job
-  job_id=my_job [debug] previous job still running, not starting another instance
-  job_id=my_job [debug] job failed with the reason `:timeout`
-  ...
-  ```
 
   ## Shutdown
 
-  Since periodic executor is a plain supervisor child, shutting down is not
-  explicitly supported. If you want to stop the job, just take it down via its
-  supervisor, or shut down either of its ancestors.
+  To stop a particular job, you need to ask its parent supervisor to stop it using
+  [Supervisor.terminate_child](https://hexdocs.pm/elixir/Supervisor.html#terminate_child/2).
+
+  The scheduler process acts as a supervisor, and so it has the same shutdown behaviour. When
+  ordered to terminate by its parent, the scheduler will stop currently running job instances
+  according to the `:job_shutdown` configuration.
+
+  The default behaviour is to wait for the job for 5 seconds. However, in order for this to
+  waiting to actually happen, you need to invoke `Process.flag(:trap_exit, true)` from the run
+  function.
+
+  You can change the waiting time with the `:job_shutdown` option, which has the same semantics as
+  in `Supervisor`. See [corresponding Supervisor documentation]
+  (https://hexdocs.pm/elixir/Supervisor.html#module-shutdown-values-shutdown) for details.
+
+
+  ## Telemetry
+
+  The scheduler optionally emits telemetry events. To configure telemetry you need to provide
+  the `:telemetry_id` option. For example:
+
+      Periodic.start_link(telemetry_id: :db_cleanup, ...)
+
+  This will emit various events in the shape of `[Periodic, telemetry_id, event]`. Currently
+  supported events are:
+
+  - `:started` - a new job instance is started
+  - `:finished` - job instance has finished or crashed (see related metadata for the reason)
+  - `:skipped` - new instance hasn't been started because the previous one is still running
+  - `:stopped_previous` - previous instance has been stopped because the new one is about to be
+    started
+
+  To consume the desired events, install the corresponding telemetry handler.
+
+
+  ## Logging
+
+  A basic logger is provided in `Periodic.Logger`. To use it, you need to provide the
+  `:telemetry_id`, and then add logger handlers with `Periodic.Logger.install(telemetry_id)`.
+
+
+  ## Testing
+
+  The scheduler can be deterministically tested by setting the `:mode` option to `:manual`.
+  In this mode, the scheduler won't tick on its own, and so it won't start any jobs unless
+  instructed to by the client.
+
+  The `:mode` should be set to `:manual` only in test mix environment. Here's a simple approach
+  which doesn't require app env and config files:
+
+      defmodule MyPeriodicJob do
+        @mode if Mix.env() != :test, do: :auto, else: :manual
+
+        def child_spec(_arg) do
+          Periodic.child_spec(
+            mode: @mode,
+            name: __MODULE__,
+            telemetry_id: __MODULE__
+            # ...
+          )
+        end
+
+        # ...
+      end
+
+  Of course, you can alternatively use app env or any other approach you prefer. Just make sure
+  to set the mode to manual only in test env.
+
+  Notice that we're also setting the registered name and telemetry id. We'll need both to
+  interact with the scheduler
+
+  With such setup in place, the general shape of the periodic job test would look like this:
+
+      def MyPeriodicJobTest do
+        use ExUnit.Case, async: true
+        require Periodic.Test
+
+        setup do
+          Periodic.Test.observe(MyPeriodicJob)
+        end
+
+        test "my periodic job" do
+          bring_the_system_into_the_desired_state()
+
+          Periodic.Test.tick(scheduler_name)
+
+          # wait for the job to finish successfully
+          Periodic.Test.assert_periodic_event(:finished, %{reason: :normal})
+
+          verify_side_effect_of_the_job()
+        end
+      end
   """
   use Parent.GenServer
   require Logger
@@ -229,8 +268,6 @@ defmodule Periodic do
       delay_mode: :regular,
       on_overlap: :run,
       timeout: :infinity,
-      log_level: nil,
-      log_meta: [],
       send_after_fun: &Process.send_after/3,
       job_shutdown: :timer.seconds(5)
     }
@@ -252,7 +289,7 @@ defmodule Periodic do
       :stop_previous ->
         with {:ok, pid} <- previous_instance() do
           Parent.GenServer.shutdown_all(:kill)
-          telemetry(state, :killed_previous, %{pid: pid})
+          telemetry(state, :stopped_previous, %{pid: pid})
         end
 
         start_job(state)
