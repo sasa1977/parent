@@ -1,15 +1,26 @@
 defmodule Periodic.Test do
+  @moduledoc """
+  Helpers for testing a periodic job.
+
+  See the "Testing" section in `Periodic` documentation for details.
+  """
+
   public_telemetry_events = ~w/started finished skipped stopped_previous/a
 
   @telemetry_events if Mix.env() != :test,
                       do: public_telemetry_events,
                       else: [:next_tick | public_telemetry_events]
 
-  def tick(pid), do: GenServer.call(pid, :tick)
+  @doc "Sends a tick signal to the given scheduler."
+  @spec tick(GenServer.name()) :: :ok
+  def tick(pid_or_name), do: GenServer.call(pid_or_name, :tick)
 
+  @doc "Subscribes to telemetry events of the given scheduler."
+  @spec observe(any) :: :ok
   def observe(telemetry_id),
     do: Enum.each(@telemetry_events, &attach_telemetry_handler(telemetry_id, &1))
 
+  @doc "Waits for the given telemetry event."
   defmacro assert_periodic_event(
              telemetry_id,
              event,
@@ -28,6 +39,7 @@ defmodule Periodic.Test do
     end
   end
 
+  @doc "Asserts that the given telemetry event won't be emitted."
   defmacro refute_periodic_event(
              telemetry_id,
              event,

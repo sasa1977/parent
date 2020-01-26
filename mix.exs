@@ -44,7 +44,10 @@ defmodule Parent.MixProject do
       extras: ["RATIONALE.md"],
       main: "Parent.GenServer",
       source_url: "https://github.com/sasa1977/parent/",
-      source_ref: @version
+      source_ref: @version,
+      groups_for_modules: [
+        "Periodic job execution": ~r/Periodic(\..+)?/
+      ]
     ]
   end
 

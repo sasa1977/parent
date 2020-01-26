@@ -2,29 +2,27 @@ defmodule Periodic do
   @moduledoc """
   Periodic job execution.
 
-  This module can be used when you need to periodically run some job.
-
   ## Quick start
 
-  It is recommended (but not mandatory!) to define a dedicated module for the job. For example:
+  It is recommended (but not required) to implement the job in a dedicated module. For example:
 
-      defmodule MySystem.Cleanup do
+      defmodule SomeCleanup do
         def child_spec(_arg) do
           Periodic.child_spec(
             id: __MODULE__,
-            run: &cleanup/0,
+            run: &run/0,
             every: :timer.hours(1)
           )
         end
 
-        defp cleanup(), do: # ...
+        defp run(), do: # ...
       end
 
-  With such module implemented, you can place the job in the desired place in the supervision tree:
+  With such module implemented, you can place the job somewhere in the supervision tree:
 
       Supervisor.start_link(
         [
-          MySystem.Cleanup,
+          SomeCleanup,
           # ...
         ],
         # ...
@@ -33,45 +31,47 @@ defmodule Periodic do
   You can of course start multiple periodic jobs in the system, and they don't have to be the
   children of the same supervisor. You're advised to place the job in the proper part of the
   supervision tree. For example, a database cleanup job should share the ancestor with the
-  repo, while a periodic job working with Phoenix channels should share the ancestor with the
+  repo, while a job working with Phoenix channels should share the ancestor with the
   endpoint.
 
   As mentioned, you don't need to create a dedicated module to run a job. It's also possible to
   provide `{Periodic, opts}` in the supervisor child list. Finally, if you need more runtime
   flexibility, you can also start the job with `start_link/1`.
 
+
   ## Process structure
 
   The process started with `start_link` is called the _scheduler_. This is the process which
-  regularly "ticks" in the given interval and executes the _job_. The job is running in a separate
+  regularly "ticks" in the given interval and executes the _job_. The job is executed in a separate
   one-off process, which is the child of the scheduler. When the job is done, the job process
-  stops. Therefore, each execution is taking place in a separate process.
+  stops. Therefore, each job instance is runnint in a separate process.
 
-  Depending on the overlapping mode (see `:on_overlap` option), it is possible that multiple
+  Depending on the overlapping mode (see the `:on_overlap` option), it can happen that multiple
   instances of the same job are running simultaneously.
 
-  No other processes are started.
 
   ## Options
 
-  - `:run` (required) - Zero arity function or MFA.
+  - `:run` (required) - Zero arity function or MFA invoked to run the job. This function is
+    invoked in a separate one-off process which is a child of the scheduler.
   - `:every` (required) - Time in milliseconds between two consecutive job executions (see
     `:delay_mode` option for details).
   - `:initial_delay` - Time in milliseconds before the first execution of the job. If not provided,
     the default value of `:every` is used. In other words, the first execution will by default
-    take place after the desired interval has passed.
-  - `:delay_mode` - Controls how the `:every` interval is interpreted. Following options are possible:
+    take place after the `:initial_delay` interval has passed.
+  - `:delay_mode` - Controls how the `:every` interval is interpreted. Following options are
+    possible:
       - `:regular` (default) - `:every` represents the time between two consecutive starts
-      - `:shifted` - `:every` represents the time between the termination of the previous
-      and the start of the next instance.
+      - `:shifted` - `:every` represents the time between the termination of the previous and the
+        start of the next instance.
   - `:on_overlap` - Defines the desired behaviour when the job is about to be started while the
     previous instance is still running.
       - `:run` (default) - always start the new job
       - `:ignore` - don't start the new job if the previous instance is still running
       - `:stop_previous` - stop the previous instance before starting the new one
-  - `:timeout` - Defines the maximum running time of the job. If the job runs for longer than that,
-    it is forcefully terminated. In this case, the job's shutdown specification is ignored.
-    Defaults to `:infinity`
+  - `:timeout` - Defines the maximum running time of the job. If the job doesn't finish in the
+    given time, it is forcefully terminated. In this case, the job's shutdown specification is
+    ignored. Defaults to `:infinity`
   - `:job_shutdown` - Shutdown value of the job process. See the "Shutdown" section
     for details.
   - `:id` - Supervisor child id of the scheduler process. Defaults to `Periodic`. If you plan on
@@ -81,27 +81,59 @@ defmodule Periodic do
     registered.
   - `:telemetry_id` - Id used in telemetry event names. See the "Telemetry" section for more
     details. If not provided, telemetry events won't be emitted.
-  - `:mode` - When set to `:manual`, doesn't start jobs automatically, but instead relies on the
-    external ticking mechanism. This should be used only in `:test` mix environment. See
+  - `:mode` - When set to `:manual`, the jobs won't be started automatically. Instead you have to
+    manually send tick signals to the scheduler. This should be used only in `:test` mix env. See
     the "Testing" section for details.
 
 
   ## Shutdown
 
-  To stop a particular job, you need to ask its parent supervisor to stop it using
+  To stop the scheduler, you need to ask its parent supervisor to stop the scheduler using
   [Supervisor.terminate_child](https://hexdocs.pm/elixir/Supervisor.html#terminate_child/2).
 
   The scheduler process acts as a supervisor, and so it has the same shutdown behaviour. When
   ordered to terminate by its parent, the scheduler will stop currently running job instances
   according to the `:job_shutdown` configuration.
 
-  The default behaviour is to wait for the job for 5 seconds. However, in order for this to
+  The default behaviour is to wait 5 seconds for the job to finish. However, in order for this
   waiting to actually happen, you need to invoke `Process.flag(:trap_exit, true)` from the run
   function.
 
   You can change the waiting time with the `:job_shutdown` option, which has the same semantics as
   in `Supervisor`. See [corresponding Supervisor documentation]
   (https://hexdocs.pm/elixir/Supervisor.html#module-shutdown-values-shutdown) for details.
+
+
+  ## Absolute time scheduling
+
+  Periodic doesn't have explicit support for scheduling jobs at some particular time (e.g. every
+  day at midnight). However, you can implement this on top of the provided functionality:
+
+      defmodule SomeCleanup do
+        def child_spec(_arg) do
+          Periodic.child_spec(
+            run: &run/0,
+
+            # we'll check every minute if we need to run the cleanup
+            every: :timer.minutes(1)
+
+            # ...
+          )
+        end
+
+        defp run() do
+          with %Time{hour: 0, minute: 0} <- Time.utc_now() do
+            # ...
+          end
+        end
+      end
+
+  Variations such as using different intervals on weekdays vs weekends, can be accomplished by
+  tweaking the conditional logic in the run function.
+
+  Note that the execution guarantees here are "at most once". If the system is down at the
+  scheduled time, the job won't be executed. Stronger guarantees can be obtained by basing the
+  conditional logic on some persistence mechanism.
 
 
   ## Telemetry
@@ -125,15 +157,19 @@ defmodule Periodic do
 
   ## Logging
 
-  A basic logger is provided in `Periodic.Logger`. To use it, you need to provide the
-  `:telemetry_id`, and then add logger handlers with `Periodic.Logger.install(telemetry_id)`.
+  Basic logger is provided in `Periodic.Logger`. To use it, the scheduler needs to be started with
+  the `:telemetry_id` option.
+
+  To install logger handlers, you can invoke `Periodic.Logger.install(telemetry_id)`. This function
+  should be invoked only once per each scheduler during the system lifetime, preferably before the
+  scheduler is started. A convenient place to do it is your application start callback.
 
 
   ## Testing
 
   The scheduler can be deterministically tested by setting the `:mode` option to `:manual`.
   In this mode, the scheduler won't tick on its own, and so it won't start any jobs unless
-  instructed to by the client.
+  instructed to by the client code.
 
   The `:mode` should be set to `:manual` only in test mix environment. Here's a simple approach
   which doesn't require app env and config files:
@@ -166,12 +202,14 @@ defmodule Periodic do
         require Periodic.Test
 
         setup do
+          # subscribe to telemetry events
           Periodic.Test.observe(MyPeriodicJob)
         end
 
         test "my periodic job" do
           bring_the_system_into_the_desired_state()
 
+          # tick the scheduler
           Periodic.Test.tick(MyPeriodicJob)
 
           # wait for the job to finish successfully
@@ -180,6 +218,43 @@ defmodule Periodic do
           verify_side_effect_of_the_job()
         end
       end
+
+  Note that this won't suffice for absolute schedules. Consider again the cleanup job which runs
+  at midnight:
+
+      defmodule SomeCleanup do
+        def child_spec(_arg) do
+          Periodic.child_spec(
+            run: &run/0,
+            every: :timer.minutes(1)
+            # ...
+          )
+        end
+
+        defp run() do
+          with %Time{hour: 0, minute: 0} <- Time.utc_now() do
+            # ...
+          end
+        end
+      end
+
+  Manually ticking won't execute the job, unless the test is running exactly at midnight. To make
+  this module testable, you need to adapt the conditional logic to always return true in test env:
+
+      defp run() do
+        if should_run?() do
+          # ...
+        end
+      end
+
+      if Mix.env() != :test do
+        defp should_run?(), do: match?(%Time{hour: 0, minute: 0}, Time.utc_now())
+      else
+        defp should_run?(), do: true
+      end
+
+  Alternatively, you can consider extracting the cleanup logic into a separate public function
+  (which could be marked with `@doc false`), and invoke the function directly.
   """
   use Parent.GenServer
   require Logger

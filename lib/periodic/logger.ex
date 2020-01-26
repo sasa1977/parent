@@ -1,6 +1,10 @@
 defmodule Periodic.Logger do
+  @moduledoc "Telemetry handler that support basic logging of periodic scheduler events."
+
   require Logger
 
+  @doc "Installs telemetry handlers for the given scheduler."
+  @spec install(any) :: :ok
   def install(telemetry_id) do
     Enum.each(
       ~w/started finished skipped stopped_previous/a,
