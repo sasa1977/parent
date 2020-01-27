@@ -205,7 +205,7 @@ defmodule Parent.Functional do
     await_terminated_children(state, pids_and_specs, :erlang.monotonic_time(:millisecond))
   end
 
-  defp stop_process({pid, %{shutdown: :brutal_kill}}, _), do: Process.exit(pid, :kill)
+  defp stop_process({pid, %{data: %{shutdown: :brutal_kill}}}, _), do: Process.exit(pid, :kill)
   defp stop_process({pid, _spec}, reason), do: Process.exit(pid, reason)
 
   defp await_terminated_children(state, [], _start_time), do: state
