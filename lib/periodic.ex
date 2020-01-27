@@ -291,15 +291,15 @@ defmodule Periodic do
 
   @impl GenServer
   def init(opts) do
-    state = defaults() |> Map.merge(opts) |> Map.put(:timer, nil)
+    state = Map.merge(defaults(), opts)
     {initial_delay, state} = Map.pop(state, :initial_delay, state.every)
     enqueue_next_tick(state, initial_delay)
     {:ok, state}
   end
 
   @impl GenServer
-  def handle_info(:tick, state) do
-    handle_tick(state)
+  def handle_info({:tick, expected_now}, state) do
+    handle_tick(state, now: expected_now)
     {:noreply, state}
   end
 
@@ -331,13 +331,12 @@ defmodule Periodic do
       delay_mode: :regular,
       on_overlap: :run,
       timeout: :infinity,
-      send_after_fun: &Process.send_after/3,
       job_shutdown: :timer.seconds(5)
     }
   end
 
-  defp handle_tick(state) do
-    if state.delay_mode == :regular, do: enqueue_next_tick(state, state.every)
+  defp handle_tick(state, opts \\ []) do
+    if state.delay_mode == :regular, do: enqueue_next_tick(state, state.every, opts)
 
     case state.on_overlap do
       :run ->
@@ -383,9 +382,14 @@ defmodule Periodic do
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
 
-  defp enqueue_next_tick(state, delay) do
+  defp enqueue_next_tick(state, delay, opts \\ []) do
     telemetry(state, :next_tick, %{in: delay})
-    if state.mode == :auto, do: state.send_after_fun.(self(), :tick, delay)
+
+    if state.mode == :auto do
+      now = Keyword.get_lazy(opts, :now, fn -> :erlang.monotonic_time(:millisecond) end)
+      next_tick_abs_time = now + delay
+      Process.send_after(self(), {:tick, next_tick_abs_time}, next_tick_abs_time, abs: true)
+    end
   end
 
   defp telemetry(state, event, data, measurements \\ %{})
