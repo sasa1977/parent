@@ -58,7 +58,7 @@ defmodule PeriodicTest do
       tick(scheduler)
       assert_receive({:DOWN, ^mref, :process, ^job, :killed})
       assert_periodic_event(:test_job, :stopped_previous, %{scheduler: ^scheduler, pid: ^job})
-      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
+      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
     end
   end
 
