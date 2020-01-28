@@ -64,6 +64,8 @@ defmodule Periodic do
       - `:regular` (default) - `:every` represents the time between two consecutive starts
       - `:shifted` - `:every` represents the time between the termination of the previous and the
         start of the next instance.
+
+    See the "Delay mode" section for more details.
   - `:on_overlap` - Defines the desired behaviour when the job is about to be started while the
     previous instance is still running.
       - `:run` (default) - always start the new job
@@ -104,7 +106,7 @@ defmodule Periodic do
   (https://hexdocs.pm/elixir/Supervisor.html#module-shutdown-values-shutdown) for details.
 
 
-  ## Absolute time scheduling
+  ## Fixed scheduling
 
   Periodic doesn't have explicit support for scheduling jobs at some particular time (e.g. every
   day at midnight). However, you can implement this on top of the provided functionality:
@@ -219,7 +221,7 @@ defmodule Periodic do
         end
       end
 
-  Note that this won't suffice for absolute schedules. Consider again the cleanup job which runs
+  Note that this won't suffice for fixed schedules. Consider again the cleanup job which runs
   at midnight:
 
       defmodule SomeCleanup do
@@ -255,6 +257,54 @@ defmodule Periodic do
 
   Alternatively, you can consider extracting the cleanup logic into a separate public function
   (which could be marked with `@doc false`), and invoke the function directly.
+
+
+  ## Delay mode
+
+  In the `:regular` mode (which is the default), the interval indicates time between two
+  consecutive starts. This mode is typically useful if you want to maintain a stable execution
+  rate (the number of executions per some time period). It is also a better choice if you're
+  implementing fixed scheduling, as advised in the "Fixed scheduling" section.
+
+  In the `:shifted` mode the interval represents the pause time between the end of the job and the
+  start of the next one. This is typically a better choice if you want to have a fixed "cool off"
+  period between two consecutive executions, to reduce the load on the system.
+
+  In the `:regular` mode, Periodic relies on absolute scheduling via monotonic time, which means
+  that BEAM is internally responsible for interval precision and stable intervals over time (see
+  [here](http://erlang.org/doc/apps/erts/time_correction.html) for details). As a result, any
+  overhead introduced by Periodic as well as job processing will be compensated, and you can
+  usually expect stable intervals with very small variations (typically in sub milliseconds range),
+  and no steady shift over time. However, in some cases, for example when the system is overloaded,
+  the variation might be more significant. See also
+  [Time correction](http://erlang.org/doc/apps/erts/time_correction.html#time-correction) and
+  [Time warp modes](http://erlang.org/doc/apps/erts/time_correction.html#time-warp-modes) in
+  Erlang documentation.
+
+  In the `:shifted` mode the job duration will affect the execution of the next job. In addition,
+  Periodic will induce a slight (usually less than 100 microseconds), but a steady skew, due to
+  its own internal processing.
+
+
+  ## Comparison to other schedulers
+
+  There are various other abstractions for running periodic jobs in BEAM, such as:
+
+    - the built-in [:timer](https://erlang.org/doc/man/timer.html) module from Erlang stdlib
+    - [erlcron](https://github.com/erlware/erlcron)
+    - [quantum](https://hexdocs.pm/quantum/readme.html)
+    - [Oban](https://hexdocs.pm/oban/Oban.html#module-periodic-cron-jobs)
+
+  Compared to `:timer`, Periodic offers some additional features, such as overlap handling,
+  distributed scheduling, and telemetry support.
+
+  Compared to most other third party libraries, Periodic will likely provide much less features
+  out of the box. So in some situations, such as database persistence or back-pressure, you might
+  need to invest more effort with Periodic. On the plus side Periodic should be simpler to use
+  in typical scenarios, and much easier to reason about, while still providing enough flexibility
+  to handle arbitrarily complex scenarios.
+
+  For a more detailed discussion, see [this blog post](https://www.theerlangelist.com/article/periodic).
   """
   use Parent.GenServer
   require Logger

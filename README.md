@@ -74,7 +74,7 @@ iex> Supervisor.start_link([MyParent], strategy: :one_for_one)
 
 ## Status
 
-This library is still in its very early days. It is being used in the production code, but not extensively.
+This library has been used in the production code, but not extensively.
 
 ## License
 
