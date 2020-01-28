@@ -93,7 +93,7 @@ The concrete examples I've seen include periodic job execution, cancelable jobs 
 
 The task at hand is to periodically (say every x seconds) run some job. It could be a cleanup job, communication with an external service, or anything else.
 
-Let's forget for the moment the existence of 3rd party libraries which cover this case, such as [quantum](https://hex.pm/packages/quantum) (I'll discuss the differences from quantum a bit later). Here's one way to implement this:
+Here's one way to implement this:
 
 ```elixir
 Task.start_link(fn ->
@@ -165,29 +165,6 @@ defmodule Demo.Periodic do
   end
 end
 ```
-
-### Parent.GenServer vs Quantum
-
-`Parent.GenServer` doesn't aim to compete with or replace quantum or similar cron-like libraries. Quantum is a great library which offers many advanced features. Moreover, implementing the scenario above with quantum can be done in a couple lines of code. I've used quantum myself in production, and if you're looking for a quick and a battle-tested solution, quantum is a great choice.
-
-On the upside, `Parent.GenServer` is much simpler to reason about. While quantum involves more complex flow between multiple processes, reasoning about `Parent.GenServer` is as simple as reasoning about any GenServer.
-
-In addition, a `Parent.GenServer` offers a high degree of flexibility. Here are some examples of what's possible with `Parent.GenServer`:
-
-- Start each periodic job in an arbitrary place in the supervision tree (as opposed to using one ticker/scheduler for all jobs).
-- Power jobs by behaviours such as GenServer or `gen_statem` (as opposed to always running them in a `Task`).
-- Cancel jobs as desired (e.g. stop a job instance if it takes too long).
-- Use arbitrary logic in intervals between consecutive job executions (e.g. incremental back-off on consecutive failures).
-
-Personally, I think that `Parent.GenServer` might be a better option in the following conditions:
-
-- The interval is fairly small.
-- You don't care about occasional drift.
-- You want to run the job locally (i.e. you don't need distributed capabilities).
-
-In my limited experience, most of periodic jobs I wanted to run had these properties, and so parent based periodic execution seems like a compelling choice.
-
-As a more elaborate demo checkout the [Periodic module](https://github.com/sasa1977/parent/blob/master/lib/periodic.ex) which implements a generic periodic runner.
 
 ## Cancellation and timeout
 
