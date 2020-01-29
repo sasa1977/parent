@@ -124,7 +124,7 @@ JobSupervisor      Ticker (GenServer)
 
 The reason why we need `TopSupervisor` is to allow us to properly stop the periodic job execution without stopping anything else in the system. The reason why it's one_for_all is to prevent us from running multiple instances of the same job, if e.g. ticker is restarted.
 
-This is a fairly complex process structure for something as simple as "invoke some function every X seconds". Moreover, these supervisors don't really lift much (if any) responsibilities from the ticker server. For example, if you don't want to prevent overlaps (running two instances of the same job at the same time), the ticker needs to keep track of currently running jobs, which means it will have to monitor them, and handle corresponding `:DOWN` messages. This will add some complexity to a server with a fairly simple basic role (start a job every X seconds).
+This is a fairly complex process structure for something as simple as "invoke some function every X seconds". Moreover, these supervisors don't really lift much (if any) responsibilities from the ticker server. For example, if you want to prevent overlaps (running two instances of the same job at the same time), the ticker needs to keep track of currently running jobs, which means it will have to monitor them, and handle corresponding `:DOWN` messages. This will add some complexity to a server with a fairly simple basic role (start a job every X seconds).
 
 Therefore, I usually resort to starting a job as a direct child under the ticker process. This will simplify the supervision tree, but it will still require some complexity in the ticker server.
 
