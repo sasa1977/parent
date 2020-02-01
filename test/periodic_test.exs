@@ -151,4 +151,24 @@ defmodule PeriodicTest do
     assert Process.whereis(:registered_name) == scheduler
     assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler})
   end
+
+  describe "job guard" do
+    test "returns true" do
+      scheduler = start_scheduler!(when: fn -> true end)
+      tick(scheduler)
+      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
+    end
+
+    test "returns false" do
+      scheduler = start_scheduler!(when: fn -> false end)
+      tick(scheduler)
+      refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
+    end
+
+    test "can be specified as mfa" do
+      scheduler = start_scheduler!(when: {:erlang, :not, [true]})
+      tick(scheduler)
+      refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
+    end
+  end
 end
