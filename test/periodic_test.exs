@@ -171,4 +171,33 @@ defmodule PeriodicTest do
       refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
     end
   end
+
+  describe "tick with `wait_job?: true`" do
+    test "returns when the process stops" do
+      captured_output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          scheduler =
+            start_scheduler!(
+              run: fn ->
+                Process.sleep(100)
+                IO.puts("some output")
+              end
+            )
+
+          assert sync_tick(scheduler) == {:ok, :normal}
+        end)
+
+      assert captured_output == "some output\n"
+    end
+
+    test "returns error if the job is not started" do
+      scheduler = start_scheduler!(when: fn -> false end)
+      assert sync_tick(scheduler) == {:error, :job_not_started}
+    end
+
+    test "raises on timeout" do
+      scheduler = start_scheduler!(run: fn -> Process.sleep(:infinity) end)
+      assert {:timeout, _} = catch_exit(sync_tick(scheduler, 0))
+    end
+  end
 end
