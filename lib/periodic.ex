@@ -44,7 +44,7 @@ defmodule Periodic do
   The process started with `start_link` is called the _scheduler_. This is the process which
   regularly "ticks" in the given interval and executes the _job_. The job is executed in a separate
   one-off process, which is the child of the scheduler. When the job is done, the job process
-  stops. Therefore, each job instance is runnint in a separate process.
+  stops. Therefore, each job instance is running in a separate process.
 
   Depending on the overlapping mode (see the `:on_overlap` option), it can happen that multiple
   instances of the same job are running simultaneously.
@@ -89,6 +89,32 @@ defmodule Periodic do
   - `:mode` - When set to `:manual`, the jobs won't be started automatically. Instead you have to
     manually send tick signals to the scheduler. This should be used only in `:test` mix env. See
     the "Testing" section for details.
+
+
+  ## Delay mode
+
+  In the `:regular` mode (which is the default), the interval indicates time between two
+  consecutive starts. This mode is typically useful if you want to maintain a stable execution
+  rate (the number of executions per some time period). It is also a better choice if you're
+  implementing fixed scheduling, as advised in the "Fixed scheduling" section.
+
+  In the `:shifted` mode the interval represents the pause time between the end of the job and the
+  start of the next one. This mode is likely a better choice if you want to have a fixed "cool off"
+  period between two consecutive executions, to reduce the load on the system.
+
+  Internally, Periodic relies on Erlang's monotonic time, which improves rate stability regardless
+  of system time changes (see [Time correction](http://erlang.org/doc/apps/erts/time_correction.html#time-correction)).
+  Consider using the "Multi-time warp mode" (see [here](http://erlang.org/doc/apps/erts/time_correction.html#time-warp-modes))
+  to further improve rate stability in the situations when system time changes.
+
+  In general, the overhead introduced by Periodic as well as job processing will be compensated,
+  and you can usually expect stable intervals with very small variations (typically in sub
+  milliseconds range), and no steady shift over time. However, in some cases, for example when the
+  system is overloaded, the variations might be more significant.
+
+  In the `:shifted` mode the job duration will affect the execution of the next job. In addition,
+  Periodic will induce a slight (usually less than 100 microseconds), but a steady skew, due to
+  its own internal processing.
 
 
   ## Shutdown
@@ -250,32 +276,6 @@ defmodule Periodic do
 
         # ...
       end
-
-  ## Delay mode
-
-  In the `:regular` mode (which is the default), the interval indicates time between two
-  consecutive starts. This mode is typically useful if you want to maintain a stable execution
-  rate (the number of executions per some time period). It is also a better choice if you're
-  implementing fixed scheduling, as advised in the "Fixed scheduling" section.
-
-  In the `:shifted` mode the interval represents the pause time between the end of the job and the
-  start of the next one. This is typically a better choice if you want to have a fixed "cool off"
-  period between two consecutive executions, to reduce the load on the system.
-
-  In the `:regular` mode, Periodic relies on absolute scheduling via monotonic time, which means
-  that BEAM is internally responsible for interval precision and stable intervals over time (see
-  [here](http://erlang.org/doc/apps/erts/time_correction.html) for details). As a result, any
-  overhead introduced by Periodic as well as job processing will be compensated, and you can
-  usually expect stable intervals with very small variations (typically in sub milliseconds range),
-  and no steady shift over time. However, in some cases, for example when the system is overloaded,
-  the variation might be more significant. See also
-  [Time correction](http://erlang.org/doc/apps/erts/time_correction.html#time-correction) and
-  [Time warp modes](http://erlang.org/doc/apps/erts/time_correction.html#time-warp-modes) in
-  Erlang documentation.
-
-  In the `:shifted` mode the job duration will affect the execution of the next job. In addition,
-  Periodic will induce a slight (usually less than 100 microseconds), but a steady skew, due to
-  its own internal processing.
 
 
   ## Comparison to other schedulers
