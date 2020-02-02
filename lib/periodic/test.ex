@@ -11,9 +11,26 @@ defmodule Periodic.Test do
                       do: public_telemetry_events,
                       else: [:next_tick | public_telemetry_events]
 
-  @doc "Sends a tick signal to the given scheduler."
-  @spec tick(GenServer.name()) :: :ok
-  def tick(pid_or_name), do: GenServer.call(pid_or_name, :tick)
+  @doc """
+  Sends a tick signal to the given scheduler.
+
+  This function returns after the tick signal has been sent, and the job has been started.
+  However, the function doesn't wait for the job to finish. If you want complete synchronism, use
+  `sync_tick/2`
+  """
+  @spec tick(GenServer.server()) :: :ok
+  def tick(pid_or_name), do: :ok = GenServer.call(pid_or_name, {:tick, []})
+
+  @doc """
+  Sends a tick signal to the given scheduler and waits for the job to finish.
+
+  The function returns the job exit reason, or error if the job hasn't been started.
+  """
+  @spec sync_tick(GenServer.server(), non_neg_integer | :infinity) ::
+          {:ok, job_exit_reason :: any} | {:error, :job_not_started}
+  def sync_tick(pid_or_name, timeout \\ :timer.seconds(5)) do
+    GenServer.call(pid_or_name, {:tick, [await_job?: true]}, timeout)
+  end
 
   @doc "Subscribes to telemetry events of the given scheduler."
   @spec observe(any) :: :ok

@@ -66,6 +66,9 @@ defmodule Periodic do
         start of the next instance.
 
     See the "Delay mode" section for more details.
+  - `:when` - Function which acts as an additional runtime guard to decide if the job will be
+    started. This can be useful for implementing fixed scheduled jobs. See the "Fixed scheduling"
+    section for details.
   - `:on_overlap` - Defines the desired behaviour when the job is about to be started while the
     previous instance is still running.
       - `:run` (default) - always start the new job
@@ -109,33 +112,31 @@ defmodule Periodic do
   ## Fixed scheduling
 
   Periodic doesn't have explicit support for scheduling jobs at some particular time (e.g. every
-  day at midnight). However, you can implement this on top of the provided functionality:
+  day at midnight). However, you can implement this on top of the provided functionality using
+  the `:when` option
 
       defmodule SomeCleanup do
         def child_spec(_arg) do
           Periodic.child_spec(
-            run: &run/0,
+            # check every minute if we need to run the cleanup
+            every: :timer.minutes(1),
 
-            # we'll check every minute if we need to run the cleanup
-            every: :timer.minutes(1)
+            # start the job only if it's midnight
+            when: fn -> match?(%Time{hour: 0, minute: 0}, Time.utc_now()) end,
 
             # ...
           )
         end
 
-        defp run() do
-          with %Time{hour: 0, minute: 0} <- Time.utc_now() do
-            # ...
-          end
-        end
+        # ...
       end
-
-  Variations such as using different intervals on weekdays vs weekends, can be accomplished by
-  tweaking the conditional logic in the run function.
 
   Note that the execution guarantees here are "at most once". If the system is down at the
   scheduled time, the job won't be executed. Stronger guarantees can be obtained by basing the
   conditional logic on some persistence mechanism.
+
+  Note that the `:when` guard is executed in the scheduler process. If the guard execution time is
+  larger than the ticking period, time drifts will occur.
 
 
   ## Telemetry
@@ -183,7 +184,6 @@ defmodule Periodic do
           Periodic.child_spec(
             mode: @mode,
             name: __MODULE__,
-            telemetry_id: __MODULE__
             # ...
           )
         end
@@ -203,19 +203,11 @@ defmodule Periodic do
         use ExUnit.Case, async: true
         require Periodic.Test
 
-        setup do
-          # subscribe to telemetry events
-          Periodic.Test.observe(MyPeriodicJob)
-        end
-
         test "my periodic job" do
           bring_the_system_into_the_desired_state()
 
           # tick the scheduler
-          Periodic.Test.tick(MyPeriodicJob)
-
-          # wait for the job to finish successfully
-          Periodic.Test.assert_periodic_event(MyPeriodicJob, :finished, %{reason: :normal})
+          assert Periodic.Test.sync_tick(MyPeriodicJob) == {:ok, :normal}
 
           verify_side_effect_of_the_job()
         end
@@ -227,37 +219,37 @@ defmodule Periodic do
       defmodule SomeCleanup do
         def child_spec(_arg) do
           Periodic.child_spec(
-            run: &run/0,
-            every: :timer.minutes(1)
+            every: :timer.minutes(1),
+            when: fn -> match?(%Time{hour: 0, minute: 0}, Time.utc_now()) end,
+
             # ...
           )
         end
 
-        defp run() do
-          with %Time{hour: 0, minute: 0} <- Time.utc_now() do
+        # ...
+      end
+
+  Manually ticking won't start the job, unless the test is running exactly at midnight. To make
+  this module testable, you need to use a different implementation of `:when` in test environment:
+
+      defmodule SomeCleanup do
+        def child_spec(_arg) do
+          Periodic.child_spec(
+            every: :timer.minutes(1),
+            when: &should_run?/0
+
             # ...
-          end
+          )
         end
-      end
 
-  Manually ticking won't execute the job, unless the test is running exactly at midnight. To make
-  this module testable, you need to adapt the conditional logic to always return true in test env:
-
-      defp run() do
-        if should_run?() do
-          # ...
+        if Mix.env() != :test do
+          defp should_run?(), do: match?(%Time{hour: 0, minute: 0}, Time.utc_now())
+        else
+          defp should_run?(), do: true
         end
+
+        # ...
       end
-
-      if Mix.env() != :test do
-        defp should_run?(), do: match?(%Time{hour: 0, minute: 0}, Time.utc_now())
-      else
-        defp should_run?(), do: true
-      end
-
-  Alternatively, you can consider extracting the cleanup logic into a separate public function
-  (which could be marked with `@doc false`), and invoke the function directly.
-
 
   ## Delay mode
 
@@ -316,13 +308,13 @@ defmodule Periodic do
           mode: :auto | :manual,
           every: pos_integer,
           initial_delay: non_neg_integer,
-          run: job_spec,
           delay_mode: :regular | :shifted,
+          run: (() -> term) | {module, atom, [term]},
+          when: (() -> boolean) | {module, atom, [term]},
           on_overlap: :run | :ignore | :stop_previous,
           timeout: pos_integer | :infinity,
           job_shutdown: :brutal_kill | :infinity | non_neg_integer()
         ]
-  @type job_spec :: (() -> term) | {module, atom, [term]}
 
   @doc "Starts the periodic executor."
   @spec start_link(opts) :: GenServer.on_start()
@@ -354,13 +346,20 @@ defmodule Periodic do
   end
 
   @impl GenServer
-  def handle_call(:tick, _from, %{mode: :manual} = state) do
-    handle_tick(state)
-    {:reply, :ok, state}
+  def handle_call({:tick, opts}, from, %{mode: :manual} = state) do
+    caller = if Keyword.get(opts, :await_job?), do: from, else: nil
+    response = handle_tick(state, caller: caller)
+
+    cond do
+      is_nil(caller) -> {:reply, :ok, state}
+      match?({:ok, _pid}, response) -> {:noreply, state}
+      true -> {:reply, {:error, :job_not_started}, state}
+    end
   end
 
   @impl Parent.GenServer
   def handle_child_terminated(_id, meta, pid, reason, state) do
+    with from when not is_nil(from) <- meta.caller, do: GenServer.reply(from, {:ok, reason})
     if state.delay_mode == :shifted, do: enqueue_next_tick(state, state.every)
 
     duration =
@@ -381,41 +380,44 @@ defmodule Periodic do
       delay_mode: :regular,
       on_overlap: :run,
       timeout: :infinity,
-      job_shutdown: :timer.seconds(5)
+      job_shutdown: :timer.seconds(5),
+      when: nil
     }
   end
 
-  defp handle_tick(state, opts \\ []) do
+  defp handle_tick(state, opts) do
     if state.delay_mode == :regular, do: enqueue_next_tick(state, state.every, opts)
+    if job_guard_satisfied?(state), do: start_job(state, opts)
+  end
 
-    case state.on_overlap do
-      :run ->
-        start_job(state)
+  defp job_guard_satisfied?(%{when: nil}), do: true
+  defp job_guard_satisfied?(%{when: {m, f, a}}), do: apply(m, f, a)
+  defp job_guard_satisfied?(%{when: fun}) when is_function(fun), do: fun.()
 
-      :ignore ->
-        case previous_instance() do
-          {:ok, pid} -> telemetry(state, :skipped, %{still_running: pid})
-          :error -> start_job(state)
-        end
+  defp start_job(%{on_overlap: :run} = state, opts),
+    do: start_job_process(state, opts)
 
-      :stop_previous ->
-        with {:ok, pid} <- previous_instance() do
-          Parent.GenServer.shutdown_all(:kill)
-          telemetry(state, :stopped_previous, %{pid: pid})
-        end
+  defp start_job(%{on_overlap: :ignore} = state, opts) do
+    case previous_instance() do
+      {:ok, pid} ->
+        telemetry(state, :skipped, %{still_running: pid})
+        nil
 
-        start_job(state)
+      :error ->
+        start_job_process(state, opts)
     end
   end
 
-  defp previous_instance() do
-    case Parent.GenServer.children() do
-      [{_id, pid, _meta}] -> {:ok, pid}
-      [] -> :error
+  defp start_job(%{on_overlap: :stop_previous} = state, opts) do
+    with {:ok, pid} <- previous_instance() do
+      Parent.GenServer.shutdown_all(:kill)
+      telemetry(state, :stopped_previous, %{pid: pid})
     end
+
+    start_job_process(state, opts)
   end
 
-  defp start_job(state) do
+  defp start_job_process(state, opts) do
     job = state.run
 
     with {:ok, pid} <-
@@ -424,13 +426,22 @@ defmodule Periodic do
              start: {Task, :start_link, [fn -> invoke_job(job) end]},
              timeout: state.timeout,
              shutdown: state.job_shutdown,
-             meta: %{started_at: :erlang.monotonic_time()}
-           }),
-         do: telemetry(state, :started, %{job: pid})
+             meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
+           }) do
+      telemetry(state, :started, %{job: pid})
+      {:ok, pid}
+    end
   end
 
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
+
+  defp previous_instance() do
+    case Parent.GenServer.children() do
+      [{_id, pid, _meta}] -> {:ok, pid}
+      [] -> :error
+    end
+  end
 
   defp enqueue_next_tick(state, delay, opts \\ []) do
     telemetry(state, :next_tick, %{in: delay})

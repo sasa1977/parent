@@ -151,4 +151,53 @@ defmodule PeriodicTest do
     assert Process.whereis(:registered_name) == scheduler
     assert_periodic_event(:test_job, :next_tick, %{scheduler: ^scheduler})
   end
+
+  describe "job guard" do
+    test "returns true" do
+      scheduler = start_scheduler!(when: fn -> true end)
+      tick(scheduler)
+      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
+    end
+
+    test "returns false" do
+      scheduler = start_scheduler!(when: fn -> false end)
+      tick(scheduler)
+      refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
+    end
+
+    test "can be specified as mfa" do
+      scheduler = start_scheduler!(when: {:erlang, :not, [true]})
+      tick(scheduler)
+      refute_periodic_event(:test_job, :started, %{scheduler: ^scheduler})
+    end
+  end
+
+  describe "tick with `wait_job?: true`" do
+    test "returns when the process stops" do
+      captured_output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          scheduler =
+            start_scheduler!(
+              run: fn ->
+                Process.sleep(100)
+                IO.puts("some output")
+              end
+            )
+
+          assert sync_tick(scheduler) == {:ok, :normal}
+        end)
+
+      assert captured_output == "some output\n"
+    end
+
+    test "returns error if the job is not started" do
+      scheduler = start_scheduler!(when: fn -> false end)
+      assert sync_tick(scheduler) == {:error, :job_not_started}
+    end
+
+    test "raises on timeout" do
+      scheduler = start_scheduler!(run: fn -> Process.sleep(:infinity) end)
+      assert {:timeout, _} = catch_exit(sync_tick(scheduler, 0))
+    end
+  end
 end

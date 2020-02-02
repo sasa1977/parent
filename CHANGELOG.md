@@ -1,3 +1,53 @@
+# 0.8.0
+
+## Periodic
+
+- Improved support for custom scheduling via the `:when` option.
+- Simplified synchronous testing via `Periodic.sync_tick/2`.
+
+### The `:when` option
+
+The `:when` option assists the implementation of custom schedulers. For example, let's say we want to run a job once a day at midnight. In previous version, the suggested approach was as follows:
+
+```elixir
+Periodic.start_link(
+  every: :timer.minutes(1),
+  run: fn ->
+    with %Time{hour: 0, minute: 0} <- Time.utc_now(),
+      do: run_job()
+  end
+)
+```
+
+Note that with this approach we're actually starting a new job process every minute, and making a decision in that process. The problem here is that telemetry events and log entries will be emitted once every minute, instead of just once per day, which will lead to a lot of unwanted noise. Consequently, with this approach some parts of `Periodic` (telemetry, logging, handling of overlapping jobs) become useless.
+
+The `:when` option can help us here. Let's see the usage first. The previous example can be rewritten as:
+
+```elixir
+Periodic.start_link(
+  every: :timer.minutes(1),
+  when: fn -> match?(%Time{hour: 0, minute: 0}, Time.utc_now()) end,
+  run: &run_job/0
+)
+```
+
+Unlike a custom check executed in the job, the `:when` function is invoked inside the scheduler process. If the function returns `false`, the job won't be started at all. As a result, all the features of `Periodic`, including telemetry and logging, will work exactly as expected. For example, telemetry events will only be emitted at midnight.
+
+### Synchronous manual ticking
+
+Previously `Periodic.Test` exposed the `tick/1` function which allowed clients to manually tick the scheduler. The problem here was that `tick` would return before the job finished, so client code needed to perform a sequence of steps to test the scheduler:
+
+1. Provide the telemetry id
+2. Setup telemetry handler in the test
+3. Invoke `tick/1`
+4. Invoke `assert_periodic_event(telemetry_id, :finished, %{reason: :normal})` to wait for the job to finish, and assert that it hasn't crashed.
+
+The new `sync_tick` function turns this into a single step:
+
+```elixir
+assert Periodic.Test.sync_tick(pid_or_registered_name) == {:ok, :normal}
+```
+
 # 0.7.0
 
 ## Periodic
