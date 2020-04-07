@@ -171,6 +171,9 @@ defmodule Parent.FunctionalTest do
 
       reducer = fn child_spec, data ->
         assert {:ok, pid, state} = Functional.start_child(data.state, child_spec)
+
+        Process.monitor(pid)
+
         %{data | state: state, children: [%{id: id(child_spec), pid: pid} | data.children]}
       end
 
@@ -181,6 +184,10 @@ defmodule Parent.FunctionalTest do
       assert Functional.size(new_state) == 0
       Enum.each(data.children, &assert(Process.alive?(&1.pid) == false))
       Enum.each(data.children, &assert(Functional.meta(new_state, &1.id) == :error))
+
+      # Check that the processes terminated in the reverse order they started in
+      assert Enum.map(data.children, & &1.pid) ==
+               await_monitored_processes(Enum.count(child_specs))
     end
   end
 
@@ -197,6 +204,15 @@ defmodule Parent.FunctionalTest do
         assert Functional.meta(new_state, id(child_spec)) == {:ok, {:updated, meta(child_spec)}}
         new_state
       end)
+    end
+  end
+
+  defp await_monitored_processes(0), do: []
+
+  defp await_monitored_processes(n) do
+    receive do
+      {:DOWN, _ref, :process, pid, _reason} ->
+        [pid | await_monitored_processes(n - 1)]
     end
   end
 end

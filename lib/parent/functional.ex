@@ -90,7 +90,8 @@ defmodule Parent.Functional do
         meta: full_child_spec.meta,
         type: full_child_spec.type,
         modules: full_child_spec.modules,
-        timer_ref: timer_ref
+        timer_ref: timer_ref,
+        startup_index: System.unique_integer([:monotonic])
       }
 
       {:ok, pid, update_in(state.registry, &Registry.register(&1, full_child_spec.id, pid, data))}
@@ -196,10 +197,7 @@ defmodule Parent.Functional do
     pids_and_specs =
       state.registry
       |> Registry.entries()
-      |> Enum.sort_by(fn {_pid, process} -> process.data.shutdown end)
-
-    # Kill all timeout timers first, because we don't want timeout to interfere with the shutdown logic.
-    Enum.each(pids_and_specs, fn {pid, process} -> kill_timer(process.data.timer_ref, pid) end)
+      |> Enum.sort_by(fn {_pid, process} -> process.data.startup_index end, &>=/2)
 
     Enum.each(pids_and_specs, &stop_process(&1, reason))
     await_terminated_children(state, pids_and_specs, :erlang.monotonic_time(:millisecond))
