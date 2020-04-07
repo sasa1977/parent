@@ -90,7 +90,8 @@ defmodule Parent.Functional do
         meta: full_child_spec.meta,
         type: full_child_spec.type,
         modules: full_child_spec.modules,
-        timer_ref: timer_ref
+        timer_ref: timer_ref,
+        startup_index: System.unique_integer([:monotonic])
       }
 
       {:ok, pid, update_in(state.registry, &Registry.register(&1, full_child_spec.id, pid, data))}
@@ -180,15 +181,6 @@ defmodule Parent.Functional do
   def shutdown_all(state, reason) do
     state = terminate_all_children(state, shutdown_reason(reason))
 
-    # The registry now contains only children which refused to die. These
-    # children are already forcefully terminated, so now we just have to
-    # wait for the :EXIT message.
-    Enum.each(Registry.entries(state.registry), fn {pid, _data} ->
-      receive do
-        {:EXIT, ^pid, _reason} -> :ok
-      end
-    end)
-
     %{state | registry: Registry.new()}
   end
 
@@ -196,41 +188,44 @@ defmodule Parent.Functional do
     pids_and_specs =
       state.registry
       |> Registry.entries()
-      |> Enum.sort_by(fn {_pid, process} -> process.data.shutdown end)
+      |> Enum.sort_by(fn {_pid, process} -> process.data.startup_index end, &>=/2)
 
-    # Kill all timeout timers first, because we don't want timeout to interfere with the shutdown logic.
-    Enum.each(pids_and_specs, fn {pid, process} -> kill_timer(process.data.timer_ref, pid) end)
-
-    Enum.each(pids_and_specs, &stop_process(&1, reason))
-    await_terminated_children(state, pids_and_specs, :erlang.monotonic_time(:millisecond))
+    await_child_termination(state, pids_and_specs, reason)
   end
 
   defp stop_process({pid, %{data: %{shutdown: :brutal_kill}}}, _), do: Process.exit(pid, :kill)
   defp stop_process({pid, _spec}, reason), do: Process.exit(pid, reason)
 
-  defp await_terminated_children(state, [], _start_time), do: state
+  defp await_child_termination(state, [], _reason), do: state
 
-  defp await_terminated_children(state, [{pid, process} | other], start_time) do
+  defp await_child_termination(state, [{pid, process} | other], reason) do
+    # Kill all timeout timers first, because we don't want timeout to interfere with the shutdown logic.
+    kill_timer(process.data.timer_ref, pid)
+
+    stop_process({pid, process}, reason)
+    start_time = :erlang.monotonic_time(:millisecond)
+
     receive do
       {:EXIT, ^pid, _reason} ->
         {:ok, _id, _data, registry} = Registry.pop(state.registry, pid)
         state = %{state | registry: registry}
-        await_terminated_children(state, other, start_time)
+        await_child_termination(state, other, reason)
     after
-      wait_time(process.data.shutdown, start_time) ->
-        # Brutally killing the child which refuses to stop, but we won't wait
-        # for the exit signal now. We'll focus on other children first, and
-        # then wait for the ones we had to forcefully kill in the next pass.
+      wait_time(process.data.shutdown, reason, start_time) ->
+        # Brutally kill the child that refuses to stop, and then
+        # continue killing the remaining children as normal
 
-        Process.exit(pid, :kill)
-        await_terminated_children(state, other, start_time)
+        state
+        |> await_child_termination([{pid, process}], :kill)
+        |> await_child_termination(other, reason)
     end
   end
 
-  defp wait_time(:infinity, _), do: :infinity
-  defp wait_time(:brutal_kill, _), do: :infinity
+  defp wait_time(:infinity, _, _), do: :infinity
+  defp wait_time(:brutal_kill, _, _), do: :infinity
+  defp wait_time(_, :kill, _), do: :infinity
 
-  defp wait_time(shutdown, start_time) when is_integer(shutdown),
+  defp wait_time(shutdown, _reason, start_time) when is_integer(shutdown),
     do: max(shutdown - (:erlang.monotonic_time(:millisecond) - start_time), 0)
 
   defp shutdown_reason(:normal), do: :shutdown
