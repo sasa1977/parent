@@ -167,27 +167,32 @@ defmodule Parent.FunctionalTest do
 
   property "shutting down all children" do
     check all child_specs <- child_specs(successful_child_spec()) do
-      initial_data = %{state: Functional.initialize(), children: []}
+      {children, state} =
+        Enum.flat_map_reduce(
+          child_specs,
+          Functional.initialize(),
+          fn child_spec, state ->
+            assert {:ok, pid, state} = Functional.start_child(state, child_spec)
+            Process.monitor(pid)
+            {[%{id: id(child_spec), pid: pid}], state}
+          end
+        )
 
-      reducer = fn child_spec, data ->
-        assert {:ok, pid, state} = Functional.start_child(data.state, child_spec)
-
-        Process.monitor(pid)
-
-        %{data | state: state, children: [%{id: id(child_spec), pid: pid} | data.children]}
-      end
-
-      data = Enum.reduce(child_specs, initial_data, reducer)
-
-      new_state = Functional.shutdown_all(data.state, :shutdown)
+      new_state = Functional.shutdown_all(state, :shutdown)
 
       assert Functional.size(new_state) == 0
-      Enum.each(data.children, &assert(Process.alive?(&1.pid) == false))
-      Enum.each(data.children, &assert(Functional.meta(new_state, &1.id) == :error))
+      Enum.each(children, &assert(Process.alive?(&1.pid) == false))
+      Enum.each(children, &assert(Functional.meta(new_state, &1.id) == :error))
 
       # Check that the processes terminated in the reverse order they started in
-      assert Enum.map(data.children, & &1.pid) ==
-               await_monitored_processes(Enum.count(child_specs))
+      terminated_pids =
+        Stream.repeatedly(fn ->
+          assert_received {:DOWN, _ref, :process, pid, _reason}
+          pid
+        end)
+        |> Enum.take(Enum.count(child_specs))
+
+      assert terminated_pids == children |> Stream.map(& &1.pid) |> Enum.reverse()
     end
   end
 
@@ -204,15 +209,6 @@ defmodule Parent.FunctionalTest do
         assert Functional.meta(new_state, id(child_spec)) == {:ok, {:updated, meta(child_spec)}}
         new_state
       end)
-    end
-  end
-
-  defp await_monitored_processes(0), do: []
-
-  defp await_monitored_processes(n) do
-    receive do
-      {:DOWN, _ref, :process, pid, _reason} ->
-        [pid | await_monitored_processes(n - 1)]
     end
   end
 end
