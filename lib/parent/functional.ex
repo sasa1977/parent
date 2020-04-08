@@ -101,31 +101,8 @@ defmodule Parent.Functional do
   @spec shutdown_child(t, id) :: t
   def shutdown_child(state, child_id) do
     case Registry.pid(state.registry, child_id) do
-      :error ->
-        raise "trying to terminate an unknown child"
-
-      {:ok, pid} ->
-        {:ok, data} = Registry.data(state.registry, pid)
-        shutdown = data.shutdown
-        exit_reason = if shutdown == :brutal_kill, do: :kill, else: :shutdown
-        wait_time = if shutdown == :brutal_kill, do: :infinity, else: shutdown
-
-        Process.exit(pid, exit_reason)
-
-        receive do
-          {:EXIT, ^pid, _reason} -> :ok
-        after
-          wait_time ->
-            Process.exit(pid, :kill)
-
-            receive do
-              {:EXIT, ^pid, _reason} -> :ok
-            end
-        end
-
-        {:ok, _id, data, registry} = Registry.pop(state.registry, pid)
-        kill_timer(data.timer_ref, pid)
-        %{state | registry: registry}
+      :error -> raise "trying to terminate an unknown child"
+      {:ok, pid} -> shutdown_child(state, pid, :shutdown)
     end
   end
 
@@ -179,57 +156,41 @@ defmodule Parent.Functional do
 
   @spec shutdown_all(t, term) :: t
   def shutdown_all(state, reason) do
-    state = terminate_all_children(state, shutdown_reason(reason))
+    reason = with :normal <- reason, do: :shutdown
 
-    %{state | registry: Registry.new()}
+    state.registry
+    |> Registry.entries()
+    |> Enum.sort_by(fn {_pid, process} -> process.data.startup_index end, &>=/2)
+    |> Enum.reduce(state, fn {pid, _process}, state -> shutdown_child(state, pid, reason) end)
   end
 
-  defp terminate_all_children(state, reason) do
-    pids_and_specs =
-      state.registry
-      |> Registry.entries()
-      |> Enum.sort_by(fn {_pid, process} -> process.data.startup_index end, &>=/2)
+  defp shutdown_child(state, pid, reason) do
+    {:ok, data} = Registry.data(state.registry, pid)
+    kill_timer(data.timer_ref, pid)
 
-    await_child_termination(state, pids_and_specs, reason)
+    exit_signal = if data.shutdown == :brutal_kill, do: :kill, else: reason
+    wait_time = if exit_signal == :kill, do: :infinity, else: data.shutdown
+
+    sync_stop_process(pid, exit_signal, wait_time)
+
+    {:ok, _id, _data, registry} = Registry.pop(state.registry, pid)
+    %{state | registry: registry}
   end
 
-  defp stop_process({pid, %{data: %{shutdown: :brutal_kill}}}, _), do: Process.exit(pid, :kill)
-  defp stop_process({pid, _spec}, reason), do: Process.exit(pid, reason)
-
-  defp await_child_termination(state, [], _reason), do: state
-
-  defp await_child_termination(state, [{pid, process} | other], reason) do
-    # Kill all timeout timers first, because we don't want timeout to interfere with the shutdown logic.
-    kill_timer(process.data.timer_ref, pid)
-
-    stop_process({pid, process}, reason)
-    start_time = :erlang.monotonic_time(:millisecond)
+  defp sync_stop_process(pid, exit_signal, wait_time) do
+    Process.exit(pid, exit_signal)
 
     receive do
-      {:EXIT, ^pid, _reason} ->
-        {:ok, _id, _data, registry} = Registry.pop(state.registry, pid)
-        state = %{state | registry: registry}
-        await_child_termination(state, other, reason)
+      {:EXIT, ^pid, _reason} -> :ok
     after
-      wait_time(process.data.shutdown, reason, start_time) ->
-        # Brutally kill the child that refuses to stop, and then
-        # continue killing the remaining children as normal
+      wait_time ->
+        Process.exit(pid, :kill)
 
-        state
-        |> await_child_termination([{pid, process}], :kill)
-        |> await_child_termination(other, reason)
+        receive do
+          {:EXIT, ^pid, _reason} -> :ok
+        end
     end
   end
-
-  defp wait_time(:infinity, _, _), do: :infinity
-  defp wait_time(:brutal_kill, _, _), do: :infinity
-  defp wait_time(_, :kill, _), do: :infinity
-
-  defp wait_time(shutdown, _reason, start_time) when is_integer(shutdown),
-    do: max(shutdown - (:erlang.monotonic_time(:millisecond) - start_time), 0)
-
-  defp shutdown_reason(:normal), do: :shutdown
-  defp shutdown_reason(other), do: other
 
   @default_spec %{meta: nil, timeout: :infinity}
 
