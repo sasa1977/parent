@@ -4,15 +4,15 @@ matrix:
     - otp_release: 20.1
       elixir: 1.6
     - otp_release: 22.0
-      elixir: 1.9
+      elixir: 1.10
 env:
   global:
     - MIX_HOME=$HOME/.mix
 cache:
   directories:
-  - $HOME/.mix
-  - deps
-  - _build
+    - $HOME/.mix
+    - deps
+    - _build
 script:
   - mix compile --warnings-as-errors
   - MIX_ENV=test mix compile --warnings-as-errors
