@@ -3,14 +3,14 @@ defmodule Parent.Functional do
   alias Parent.Registry
   use Parent.PublicTypes
 
-  @opaque t :: %{registry: Registry.t()}
+  @opaque t :: %{registry: Registry.t(), startup_index: non_neg_integer}
   @type on_handle_message :: {child_exit_message, t} | :error | :ignore
   @type child_exit_message :: {:EXIT, pid, id, child_meta, reason :: term}
 
   @spec initialize() :: t
   def initialize() do
     Process.flag(:trap_exit, true)
-    %{registry: Registry.new()}
+    %{registry: Registry.new(), startup_index: 0}
   end
 
   @spec entries(t) :: [child]
@@ -91,10 +91,12 @@ defmodule Parent.Functional do
         type: full_child_spec.type,
         modules: full_child_spec.modules,
         timer_ref: timer_ref,
-        startup_index: System.unique_integer([:monotonic])
+        startup_index: state.startup_index
       }
 
-      {:ok, pid, update_in(state.registry, &Registry.register(&1, full_child_spec.id, pid, data))}
+      registry = Registry.register(state.registry, full_child_spec.id, pid, data)
+
+      {:ok, pid, %{state | registry: registry, startup_index: state.startup_index + 1}}
     end
   end
 
