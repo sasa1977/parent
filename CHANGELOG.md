@@ -1,3 +1,7 @@
+# 0.9.0
+
+- `Parent.GenServer` terminates children synchronously, in the reverse start order. The same change holds for `shutdown_all/1`.
+
 # 0.8.0
 
 ## Periodic
