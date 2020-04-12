@@ -124,9 +124,12 @@ defmodule Parent.GenServer do
   ## Termination
 
   The behaviour takes down the child processes during termination, to ensure that
-  no child process is running after the parent has terminated. This happens after
-  the `terminate/1` callback returns. Therefore in `terminate/1` the child
-  processes are still running, and you can interact with them.
+  no child process is running after the parent has terminated. The children are
+  terminated synchronously, one by one, in the reverse start order.
+
+  The termination of the children is done after the `terminate/1` callback returns.
+  Therefore in `terminate/1` the child processes are still running, and you can
+  interact with them.
 
   ## Supervisor compliance
 
@@ -169,8 +172,8 @@ defmodule Parent.GenServer do
   @doc """
   Terminates all running child processes.
 
-  The order in which processes are taken down is not guaranteed.
-  The function returns after all of the processes have been terminated.
+  Children are terminated synchronously, in the reverse order from the order they
+  have been started in.
   """
   @spec shutdown_all(reason :: term) :: :ok
   defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
