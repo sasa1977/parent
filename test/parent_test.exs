@@ -147,10 +147,27 @@ defmodule ParentTest do
   property "shutting down all children" do
     check all child_specs <- child_specs(successful_child_spec()) do
       init()
-      Enum.each(child_specs, &({:ok, _} = Parent.start_child(&1)))
+
+      children =
+        Enum.map(child_specs, fn spec ->
+          {:ok, child} = Parent.start_child(spec)
+          Process.monitor(child)
+          child
+        end)
+
       assert Parent.size() > 0
       Parent.shutdown_all(:shutdown)
       assert Parent.size() == 0
+
+      # Check that the processes terminated in the reverse order they started in
+      terminated_pids =
+        Stream.repeatedly(fn ->
+          assert_received {:DOWN, _ref, :process, pid, _reason}
+          pid
+        end)
+        |> Enum.take(Enum.count(child_specs))
+
+      assert terminated_pids == Enum.reverse(children)
     end
   end
 
