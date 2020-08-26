@@ -158,7 +158,7 @@ defmodule Parent.GenServer do
 
   @doc "Starts the child described by the specification."
   @spec start_child(child_spec | module | {module, term}) :: on_start_child
-  defdelegate start_child(child_spec), to: Parent.Procdict
+  defdelegate start_child(child_spec), to: Parent
 
   @doc """
   Terminates the child.
@@ -167,7 +167,7 @@ defmodule Parent.GenServer do
   termination, `handle_child_terminated/5` will not be invoked.
   """
   @spec shutdown_child(id) :: :ok
-  defdelegate shutdown_child(child_id), to: Parent.Procdict
+  defdelegate shutdown_child(child_id), to: Parent
 
   @doc """
   Terminates all running child processes.
@@ -176,31 +176,31 @@ defmodule Parent.GenServer do
   have been started in.
   """
   @spec shutdown_all(reason :: term) :: :ok
-  defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
+  defdelegate shutdown_all(reason \\ :shutdown), to: Parent
 
   @doc "Returns the list of running child processes."
   @spec children :: [child]
-  defdelegate children(), to: Parent.Procdict, as: :entries
+  defdelegate children(), to: Parent, as: :entries
 
   @doc "Returns the count of running child processes."
   @spec num_children() :: non_neg_integer
-  defdelegate num_children(), to: Parent.Procdict, as: :size
+  defdelegate num_children(), to: Parent, as: :size
 
   @doc "Returns the id of a child process with the given pid."
   @spec child_id(pid) :: {:ok, id} | :error
-  defdelegate child_id(pid), to: Parent.Procdict, as: :id
+  defdelegate child_id(pid), to: Parent, as: :id
 
   @doc "Returns the pid of a child process with the given id."
   @spec child_pid(id) :: {:ok, pid} | :error
-  defdelegate child_pid(id), to: Parent.Procdict, as: :pid
+  defdelegate child_pid(id), to: Parent, as: :pid
 
   @doc "Returns the meta associated with the given child id."
   @spec child_meta(id) :: {:ok, child_meta} | :error
-  defdelegate child_meta(id), to: Parent.Procdict, as: :meta
+  defdelegate child_meta(id), to: Parent, as: :meta
 
   @doc "Updates the meta of the given child process."
   @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
-  defdelegate update_child_meta(id, updater), to: Parent.Procdict, as: :update_meta
+  defdelegate update_child_meta(id, updater), to: Parent, as: :update_meta
 
   @doc """
   Awaits for the child to terminate.
@@ -209,7 +209,7 @@ defmodule Parent.GenServer do
   """
   @spec await_child_termination(id, non_neg_integer() | :infinity) ::
           {pid, child_meta, reason :: term} | :timeout
-  defdelegate await_child_termination(id, timeout), to: Parent.Procdict, as: :await_termination
+  defdelegate await_child_termination(id, timeout), to: Parent, as: :await_termination
 
   @doc """
   Returns true if the child process is still running, false otherwise.
@@ -227,13 +227,13 @@ defmodule Parent.GenServer do
     Process.put(:"$initial_call", {:supervisor, callback, 1})
 
     Process.put({__MODULE__, :callback}, callback)
-    Parent.Procdict.initialize()
+    Parent.initialize()
     invoke_callback(:init, [arg])
   end
 
   @impl GenServer
   def handle_info(message, state) do
-    case Parent.Procdict.handle_message(message) do
+    case Parent.handle_message(message) do
       :ignore ->
         {:noreply, state}
 
@@ -247,10 +247,10 @@ defmodule Parent.GenServer do
 
   @impl GenServer
   def handle_call(:which_children, _from, state),
-    do: {:reply, Parent.Procdict.supervisor_which_children(), state}
+    do: {:reply, Parent.supervisor_which_children(), state}
 
   def handle_call(:count_children, _from, state),
-    do: {:reply, Parent.Procdict.supervisor_count_children(), state}
+    do: {:reply, Parent.supervisor_count_children(), state}
 
   def handle_call(message, from, state), do: invoke_callback(:handle_call, [message, from, state])
 
@@ -277,7 +277,7 @@ defmodule Parent.GenServer do
   def terminate(reason, state) do
     invoke_callback(:terminate, [reason, state])
   after
-    Parent.Procdict.shutdown_all(reason)
+    Parent.shutdown_all(reason)
   end
 
   unless Version.compare(System.version(), "1.7.0") == :lt do

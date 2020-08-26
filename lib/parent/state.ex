@@ -1,4 +1,4 @@
-defmodule Parent.Functional do
+defmodule Parent.State do
   @moduledoc false
   alias Parent.Registry
   use Parent.PublicTypes

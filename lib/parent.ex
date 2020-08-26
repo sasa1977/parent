@@ -1,12 +1,12 @@
-defmodule Parent.Procdict do
+defmodule Parent do
   @moduledoc false
-  alias Parent.Functional
+  alias Parent.State
   use Parent.PublicTypes
 
   @spec initialize() :: :ok
   def initialize() do
-    if initialized?(), do: raise("#{__MODULE__} is already initialized")
-    Process.put(__MODULE__, Functional.initialize())
+    if initialized?(), do: raise("Parent state is already initialized")
+    Process.put(__MODULE__, State.initialize())
     :ok
   end
 
@@ -15,7 +15,7 @@ defmodule Parent.Procdict do
 
   @spec start_child(child_spec | module | {module, term}) :: on_start_child
   def start_child(child_spec) do
-    with result <- Functional.start_child(state(), child_spec),
+    with result <- State.start_child(state(), child_spec),
          {:ok, pid, state} <- result do
       store(state)
       {:ok, pid}
@@ -24,21 +24,21 @@ defmodule Parent.Procdict do
 
   @spec shutdown_child(id) :: :ok
   def shutdown_child(child_id) do
-    state = Functional.shutdown_child(state(), child_id)
+    state = State.shutdown_child(state(), child_id)
     store(state)
     :ok
   end
 
   @spec shutdown_all(term) :: :ok
   def shutdown_all(reason) do
-    state = Functional.shutdown_all(state(), reason)
+    state = State.shutdown_all(state(), reason)
     store(state)
     :ok
   end
 
-  @spec handle_message(term) :: Functional.child_exit_message() | :error | :ignore
+  @spec handle_message(term) :: State.child_exit_message() | :error | :ignore
   def handle_message(message) do
-    with {result, state} <- Functional.handle_message(state(), message) do
+    with {result, state} <- State.handle_message(state(), message) do
       store(state)
       result
     end
@@ -47,17 +47,17 @@ defmodule Parent.Procdict do
   @spec await_termination(id, non_neg_integer() | :infinity) ::
           {pid, child_meta, reason :: term} | :timeout
   def await_termination(child_id, timeout) do
-    with {result, state} <- Functional.await_termination(state(), child_id, timeout) do
+    with {result, state} <- State.await_termination(state(), child_id, timeout) do
       store(state)
       result
     end
   end
 
   @spec entries :: [child]
-  def entries(), do: Functional.entries(state())
+  def entries(), do: State.entries(state())
 
   @spec supervisor_which_children() :: [{term(), pid(), :worker, [module()] | :dynamic}]
-  def supervisor_which_children(), do: Functional.supervisor_which_children(state())
+  def supervisor_which_children(), do: State.supervisor_which_children(state())
 
   @spec supervisor_count_children() :: [
           specs: non_neg_integer,
@@ -65,29 +65,29 @@ defmodule Parent.Procdict do
           supervisors: non_neg_integer,
           workers: non_neg_integer
         ]
-  def supervisor_count_children(), do: Functional.supervisor_count_children(state())
+  def supervisor_count_children(), do: State.supervisor_count_children(state())
 
   @spec size() :: non_neg_integer
-  def size(), do: Functional.size(state())
+  def size(), do: State.size(state())
 
   @spec id(pid) :: {:ok, id} | :error
-  def id(pid), do: Functional.id(state(), pid)
+  def id(pid), do: State.id(state(), pid)
 
   @spec pid(id) :: {:ok, pid} | :error
-  def pid(id), do: Functional.pid(state(), id)
+  def pid(id), do: State.pid(state(), id)
 
   @spec meta(id) :: {:ok, child_meta} | :error
-  def meta(id), do: Functional.meta(state(), id)
+  def meta(id), do: State.meta(state(), id)
 
   @spec update_meta(id, (child_meta -> child_meta)) :: :ok | :error
   def update_meta(id, updater) do
-    with {:ok, new_state} <- Functional.update_meta(state(), id, updater) do
+    with {:ok, new_state} <- State.update_meta(state(), id, updater) do
       store(new_state)
       :ok
     end
   end
 
-  @spec state() :: Functional.t()
+  @spec state() :: State.t()
   defp state() do
     state = Process.get(__MODULE__)
     if is_nil(state), do: raise("#{__MODULE__} is not initialized")
