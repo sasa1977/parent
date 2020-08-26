@@ -237,6 +237,9 @@ defmodule Parent.GenServer do
       {:EXIT, pid, id, meta, reason} ->
         invoke_callback(:handle_child_terminated, [id, meta, pid, reason, state])
 
+      :ignore ->
+        {:noreply, state}
+
       nil ->
         invoke_callback(:handle_info, [message, state])
     end

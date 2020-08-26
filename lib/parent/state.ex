@@ -4,8 +4,8 @@ defmodule Parent.State do
   use Parent.PublicTypes
 
   @opaque t :: %{registry: Registry.t(), startup_index: non_neg_integer}
-  @type on_handle_message :: {child_exit_message, t} | nil
-  @type child_exit_message :: {:EXIT, pid, id, child_meta, reason :: term}
+  @type on_handle_message :: {handle_message_response, t} | nil
+  @type handle_message_response :: {:EXIT, pid, id, child_meta, reason :: term} | :ignore
 
   @spec initialize() :: t
   def initialize() do
@@ -124,6 +124,16 @@ defmodule Parent.State do
     child = Map.fetch!(Registry.entries(state.registry), pid)
     state = shutdown_child(state, pid, :kill)
     {{:EXIT, pid, child.id, child.data.meta, :timeout}, state}
+  end
+
+  def handle_message(state, {:"$gen_call", client, :which_children}) do
+    GenServer.reply(client, supervisor_which_children(state))
+    {:ignore, state}
+  end
+
+  def handle_message(state, {:"$gen_call", client, :count_children}) do
+    GenServer.reply(client, supervisor_count_children(state))
+    {:ignore, state}
   end
 
   def handle_message(_state, _other), do: nil

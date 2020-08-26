@@ -69,6 +69,31 @@ defmodule ParentTest do
     assert Parent.children() == [{:child, child_pid, :child_meta}]
   end
 
+  test "supervisor calls are handled by `handle_message`" do
+    parent = self()
+
+    init()
+
+    {:ok, child} =
+      Parent.start_child(%{id: :child, start: fn -> Agent.start_link(fn -> :ok end) end})
+
+    task =
+      Task.async(fn ->
+        assert :supervisor.which_children(parent) == [{:child, child, :worker, [ParentTest]}]
+
+        assert :supervisor.count_children(parent) ==
+                 [active: 1, specs: 1, supervisors: 0, workers: 1]
+      end)
+
+    assert_receive message
+    assert Parent.handle_message(message) == :ignore
+
+    assert_receive message
+    assert Parent.handle_message(message) == :ignore
+
+    Task.await(task)
+  end
+
   property "started processes are registered" do
     check all child_specs <- child_specs(successful_child_spec()) do
       init()

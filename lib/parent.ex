@@ -57,7 +57,23 @@ defmodule Parent do
     :ok
   end
 
-  @spec handle_message(term) :: State.child_exit_message() | nil
+  @doc """
+  Should be invoked by the parent process for each incoming message.
+
+  If the given message is not handled, this function returns `nil`. In such cases, the client code
+  should perform standard message handling. Otherwise, the message has been handled by the parent,
+  and the client code doesn't shouldn't treat this message as a standard message (e.g. by calling
+  `handle_info` of the callback module).
+
+  However, in some cases, a client might want to do some special processing, so the return value
+  will contain information which might be of interest to the client. Possible values are:
+
+    - `{:EXIT, pid, id, child_meta, reason :: term}` - a child process has terminated
+    - `:ignore` - `Parent` handled this message, but there's no useful information to return
+
+  Note that you don't need to invoke this function in a `Parent.GenServer` callback module.
+  """
+  @spec handle_message(term) :: State.handle_message_response() | nil
   def handle_message(message) do
     with {result, state} <- State.handle_message(state(), message) do
       store(state)
@@ -93,9 +109,23 @@ defmodule Parent do
   @spec child?(id) :: boolean
   def child?(id), do: match?({:ok, _}, child_pid(id))
 
+  @doc """
+  Should be invoked by the behaviour when handling `:which_children` GenServer call.
+
+  You only need to invoke this function if you're implementing a generic behaviour which can
+  handle `GenServer` calls. Alternatively, if you're handling all messages yourself, this
+  function will be automatically invoked through `handle_message/1`.
+  """
   @spec supervisor_which_children() :: [{term(), pid(), :worker, [module()] | :dynamic}]
   def supervisor_which_children(), do: State.supervisor_which_children(state())
 
+  @doc """
+  Should be invoked by the behaviour when handling `:count_children` GenServer call.
+
+  You only need to invoke this function if you're implementing a generic behaviour which can
+  handle `GenServer` calls. Alternatively, if you're handling all messages yourself, this
+  function will be automatically invoked through `handle_message/1`.
+  """
   @spec supervisor_count_children() :: [
           specs: non_neg_integer,
           active: non_neg_integer,
