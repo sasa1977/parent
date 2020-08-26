@@ -57,7 +57,7 @@ defmodule Parent do
     :ok
   end
 
-  @spec handle_message(term) :: State.child_exit_message() | :error | :ignore
+  @spec handle_message(term) :: State.child_exit_message() | nil
   def handle_message(message) do
     with {result, state} <- State.handle_message(state(), message) do
       store(state)

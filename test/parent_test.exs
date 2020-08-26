@@ -126,7 +126,7 @@ defmodule ParentTest do
   property "handling of other messages" do
     check all message <- one_of([term(), constant({:EXIT, self(), :normal})]) do
       init()
-      assert Parent.handle_message(message) == :error
+      assert Parent.handle_message(message) == nil
     end
   end
 

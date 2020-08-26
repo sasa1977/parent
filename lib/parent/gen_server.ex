@@ -234,13 +234,10 @@ defmodule Parent.GenServer do
   @impl GenServer
   def handle_info(message, state) do
     case Parent.handle_message(message) do
-      :ignore ->
-        {:noreply, state}
-
       {:EXIT, pid, id, meta, reason} ->
         invoke_callback(:handle_child_terminated, [id, meta, pid, reason, state])
 
-      :error ->
+      nil ->
         invoke_callback(:handle_info, [message, state])
     end
   end

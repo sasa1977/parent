@@ -4,7 +4,7 @@ defmodule Parent.State do
   use Parent.PublicTypes
 
   @opaque t :: %{registry: Registry.t(), startup_index: non_neg_integer}
-  @type on_handle_message :: {child_exit_message, t} | :error | :ignore
+  @type on_handle_message :: {child_exit_message, t} | nil
   @type child_exit_message :: {:EXIT, pid, id, child_meta, reason :: term}
 
   @spec initialize() :: t
@@ -110,31 +110,23 @@ defmodule Parent.State do
 
   @spec handle_message(t, term) :: on_handle_message
   def handle_message(state, {:EXIT, pid, reason}) do
-    with {:ok, id, data, registry} <- Registry.pop(state.registry, pid) do
-      kill_timer(data.timer_ref, pid)
-      {{:EXIT, pid, id, data.meta, reason}, %{state | registry: registry}}
+    case Registry.pop(state.registry, pid) do
+      {:ok, id, data, registry} ->
+        kill_timer(data.timer_ref, pid)
+        {{:EXIT, pid, id, data.meta, reason}, %{state | registry: registry}}
+
+      :error ->
+        nil
     end
   end
 
   def handle_message(state, {__MODULE__, :child_timeout, pid}) do
-    case Registry.pop(state.registry, pid) do
-      {:ok, id, data, registry} ->
-        Process.exit(pid, :kill)
-
-        receive do
-          {:EXIT, ^pid, _reason} -> :ok
-        end
-
-        {{:EXIT, pid, id, data.meta, :timeout}, %{state | registry: registry}}
-
-      :error ->
-        # The timeout has occurred, just after the child terminated. Since this
-        # is still an internal message, we'll just ignore it.
-        :ignore
-    end
+    child = Map.fetch!(Registry.entries(state.registry), pid)
+    state = shutdown_child(state, pid, :kill)
+    {{:EXIT, pid, child.id, child.data.meta, :timeout}, state}
   end
 
-  def handle_message(_state, _other), do: :error
+  def handle_message(_state, _other), do: nil
 
   @spec await_child_termination(t, id, non_neg_integer() | :infinity) ::
           {{pid, child_meta, reason :: term}, t} | :timeout
