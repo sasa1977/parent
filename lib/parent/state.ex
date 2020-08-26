@@ -13,8 +13,8 @@ defmodule Parent.State do
     %{registry: Registry.new(), startup_index: 0}
   end
 
-  @spec entries(t) :: [child]
-  def entries(state) do
+  @spec children(t) :: [child]
+  def children(state) do
     state.registry
     |> Registry.entries()
     |> Enum.map(fn {pid, process} -> {process.id, pid, process.data.meta} end)
@@ -50,24 +50,24 @@ defmodule Parent.State do
     |> Map.to_list()
   end
 
-  @spec size(t) :: non_neg_integer
-  def size(state), do: Registry.size(state.registry)
+  @spec num_children(t) :: non_neg_integer
+  def num_children(state), do: Registry.size(state.registry)
 
-  @spec id(t, pid) :: {:ok, id} | :error
-  def id(state, pid), do: Registry.id(state.registry, pid)
+  @spec child_id(t, pid) :: {:ok, id} | :error
+  def child_id(state, pid), do: Registry.id(state.registry, pid)
 
-  @spec pid(t, id) :: {:ok, pid} | :error
-  def pid(state, id), do: Registry.pid(state.registry, id)
+  @spec child_pid(t, id) :: {:ok, pid} | :error
+  def child_pid(state, id), do: Registry.pid(state.registry, id)
 
-  @spec meta(t, id) :: {:ok, child_meta} | :error
-  def meta(state, id) do
+  @spec child_meta(t, id) :: {:ok, child_meta} | :error
+  def child_meta(state, id) do
     with {:ok, pid} <- Registry.pid(state.registry, id),
          {:ok, data} <- Registry.data(state.registry, pid),
          do: {:ok, data.meta}
   end
 
-  @spec update_meta(t, id, (child_meta -> child_meta)) :: {:ok, t} | :error
-  def update_meta(state, id, updater) do
+  @spec update_child_meta(t, id, (child_meta -> child_meta)) :: {:ok, t} | :error
+  def update_child_meta(state, id, updater) do
     with {:ok, pid} <- Registry.pid(state.registry, id),
          {:ok, updated_registry} <-
            Registry.update(state.registry, pid, &update_in(&1.meta, updater)),
@@ -136,9 +136,9 @@ defmodule Parent.State do
 
   def handle_message(_state, _other), do: :error
 
-  @spec await_termination(t, id, non_neg_integer() | :infinity) ::
+  @spec await_child_termination(t, id, non_neg_integer() | :infinity) ::
           {{pid, child_meta, reason :: term}, t} | :timeout
-  def await_termination(state, child_id, timeout) do
+  def await_child_termination(state, child_id, timeout) do
     case Registry.pid(state.registry, child_id) do
       :error ->
         raise "unknown child"

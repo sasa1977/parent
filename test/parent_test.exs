@@ -24,7 +24,7 @@ defmodule ParentTest do
 
     Parent.shutdown_all(:shutdown)
 
-    assert Parent.size() == 0
+    assert Parent.num_children() == 0
     refute Process.alive?(stubborn_pid)
     refute Process.alive?(normal_pid)
   end
@@ -42,7 +42,7 @@ defmodule ParentTest do
 
     assert_receive {Parent.State, :child_timeout, ^child_pid} = message
     assert Parent.handle_message(message) == {:EXIT, child_pid, :child, :timeout_meta, :timeout}
-    assert Parent.size() == 0
+    assert Parent.num_children() == 0
     refute Process.alive?(child_pid)
   end
 
@@ -52,9 +52,9 @@ defmodule ParentTest do
     child = %{id: :child, start: fn -> Task.start_link(fn -> :ok end) end, meta: :child_meta}
     {:ok, child_pid} = Parent.start_child(child)
 
-    assert {^child_pid, :child_meta, :normal} = Parent.await_termination(:child, 1000)
+    assert {^child_pid, :child_meta, :normal} = Parent.await_child_termination(:child, 1000)
     refute Process.alive?(child_pid)
-    assert Parent.size() == 0
+    assert Parent.num_children() == 0
   end
 
   test "timeouts awaiting child termination" do
@@ -63,10 +63,10 @@ defmodule ParentTest do
     child = %{id: :child, start: fn -> Agent.start_link(fn -> :ok end) end, meta: :child_meta}
     {:ok, child_pid} = Parent.start_child(child)
 
-    assert Parent.await_termination(:child, 100) == :timeout
+    assert Parent.await_child_termination(:child, 100) == :timeout
     assert Process.alive?(child_pid)
-    assert Parent.size() == 1
-    assert Parent.entries() == [{:child, child_pid, :child_meta}]
+    assert Parent.num_children() == 1
+    assert Parent.children() == [{:child, child_pid, :child_meta}]
   end
 
   property "started processes are registered" do
@@ -75,12 +75,13 @@ defmodule ParentTest do
 
       child_specs
       |> Enum.map(fn child_spec ->
-        assert {:ok, pid} = Parent.start_child(child_spec)
+        {:ok, pid} = Parent.start_child(child_spec)
         %{id: id(child_spec), meta: meta(child_spec), pid: pid}
       end)
       |> Enum.each(fn data ->
-        assert Parent.id(data.pid) == {:ok, data.id}
-        assert Parent.meta(data.id) == {:ok, data.meta}
+        assert Parent.child?(data.id)
+        assert Parent.child_id(data.pid) == {:ok, data.id}
+        assert Parent.child_meta(data.id) == {:ok, data.meta}
       end)
     end
   end
@@ -92,9 +93,11 @@ defmodule ParentTest do
       Enum.each(
         child_specs,
         fn spec ->
-          assert Parent.start_child(spec) == {:error, :not_started}
-          assert Parent.size() == 0
-          assert Parent.pid(spec.id) == :error
+          {:error, :not_started} = Parent.start_child(spec)
+
+          assert Parent.num_children() == 0
+          refute Parent.child?(spec.id)
+          assert Parent.child_pid(spec.id) == :error
         end
       )
     end
@@ -106,7 +109,7 @@ defmodule ParentTest do
       Enum.each(exit_data.starts, &Parent.start_child/1)
 
       Enum.each(exit_data.stops, fn child_spec ->
-        {:ok, pid} = Parent.pid(id(child_spec))
+        {:ok, pid} = Parent.child_pid(id(child_spec))
         Agent.stop(pid, :shutdown)
 
         assert_receive {:EXIT, ^pid, reason} = message
@@ -114,8 +117,8 @@ defmodule ParentTest do
         assert id == id(child_spec)
         assert meta == meta(child_spec)
 
-        assert Parent.pid(id(child_spec)) == :error
-        assert Parent.id(pid) == :error
+        assert Parent.child_pid(id(child_spec)) == :error
+        assert Parent.child_id(pid) == :error
       end)
     end
   end
@@ -133,13 +136,13 @@ defmodule ParentTest do
       Enum.each(exit_data.starts, &Parent.start_child/1)
 
       Enum.each(exit_data.stops, fn child_spec ->
-        {:ok, pid} = Parent.pid(id(child_spec))
+        {:ok, pid} = Parent.child_pid(id(child_spec))
         assert Parent.shutdown_child(id(child_spec)) == :ok
 
         refute Process.alive?(pid)
         refute_receive {:EXIT, ^pid, _reason}
-        assert Parent.pid(id(child_spec)) == :error
-        assert Parent.id(pid) == :error
+        assert Parent.child_pid(id(child_spec)) == :error
+        assert Parent.child_id(pid) == :error
       end)
     end
   end
@@ -155,9 +158,9 @@ defmodule ParentTest do
           child
         end)
 
-      assert Parent.size() > 0
+      assert Parent.num_children() > 0
       Parent.shutdown_all(:shutdown)
-      assert Parent.size() == 0
+      assert Parent.num_children() == 0
 
       # Check that the processes terminated in the reverse order they started in
       terminated_pids =
@@ -177,9 +180,9 @@ defmodule ParentTest do
       Enum.each(picks.all, &({:ok, _} = Parent.start_child(&1)))
 
       meta_updater = &{:updated, &1}
-      Enum.each(picks.some, &(:ok = Parent.update_meta(id(&1), meta_updater)))
+      Enum.each(picks.some, &(:ok = Parent.update_child_meta(id(&1), meta_updater)))
 
-      Enum.each(picks.some, &assert(Parent.meta(id(&1)) == {:ok, {:updated, meta(&1)}}))
+      Enum.each(picks.some, &assert(Parent.child_meta(id(&1)) == {:ok, {:updated, meta(&1)}}))
     end
   end
 

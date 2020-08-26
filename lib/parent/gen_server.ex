@@ -180,27 +180,27 @@ defmodule Parent.GenServer do
 
   @doc "Returns the list of running child processes."
   @spec children :: [child]
-  defdelegate children(), to: Parent, as: :entries
+  defdelegate children(), to: Parent
 
   @doc "Returns the count of running child processes."
   @spec num_children() :: non_neg_integer
-  defdelegate num_children(), to: Parent, as: :size
+  defdelegate num_children(), to: Parent
 
   @doc "Returns the id of a child process with the given pid."
   @spec child_id(pid) :: {:ok, id} | :error
-  defdelegate child_id(pid), to: Parent, as: :id
+  defdelegate child_id(pid), to: Parent
 
   @doc "Returns the pid of a child process with the given id."
   @spec child_pid(id) :: {:ok, pid} | :error
-  defdelegate child_pid(id), to: Parent, as: :pid
+  defdelegate child_pid(id), to: Parent
 
   @doc "Returns the meta associated with the given child id."
   @spec child_meta(id) :: {:ok, child_meta} | :error
-  defdelegate child_meta(id), to: Parent, as: :meta
+  defdelegate child_meta(id), to: Parent
 
   @doc "Updates the meta of the given child process."
   @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
-  defdelegate update_child_meta(id, updater), to: Parent, as: :update_meta
+  defdelegate update_child_meta(id, updater), to: Parent
 
   @doc """
   Awaits for the child to terminate.
@@ -209,7 +209,7 @@ defmodule Parent.GenServer do
   """
   @spec await_child_termination(id, non_neg_integer() | :infinity) ::
           {pid, child_meta, reason :: term} | :timeout
-  defdelegate await_child_termination(id, timeout), to: Parent, as: :await_termination
+  defdelegate await_child_termination(id, timeout), to: Parent
 
   @doc """
   Returns true if the child process is still running, false otherwise.
@@ -219,7 +219,7 @@ defmodule Parent.GenServer do
   processed.
   """
   @spec child?(id) :: boolean
-  def child?(id), do: match?({:ok, _}, child_pid(id))
+  defdelegate child?(id), to: Parent
 
   @impl GenServer
   def init({callback, arg}) do

@@ -44,17 +44,20 @@ defmodule Parent do
     end
   end
 
-  @spec await_termination(id, non_neg_integer() | :infinity) ::
+  @spec await_child_termination(id, non_neg_integer() | :infinity) ::
           {pid, child_meta, reason :: term} | :timeout
-  def await_termination(child_id, timeout) do
-    with {result, state} <- State.await_termination(state(), child_id, timeout) do
+  def await_child_termination(child_id, timeout) do
+    with {result, state} <- State.await_child_termination(state(), child_id, timeout) do
       store(state)
       result
     end
   end
 
-  @spec entries :: [child]
-  def entries(), do: State.entries(state())
+  @spec children :: [child]
+  def children(), do: State.children(state())
+
+  @spec child?(id) :: boolean
+  def child?(id), do: match?({:ok, _}, child_pid(id))
 
   @spec supervisor_which_children() :: [{term(), pid(), :worker, [module()] | :dynamic}]
   def supervisor_which_children(), do: State.supervisor_which_children(state())
@@ -67,21 +70,21 @@ defmodule Parent do
         ]
   def supervisor_count_children(), do: State.supervisor_count_children(state())
 
-  @spec size() :: non_neg_integer
-  def size(), do: State.size(state())
+  @spec num_children() :: non_neg_integer
+  def num_children(), do: State.num_children(state())
 
-  @spec id(pid) :: {:ok, id} | :error
-  def id(pid), do: State.id(state(), pid)
+  @spec child_id(pid) :: {:ok, id} | :error
+  def child_id(pid), do: State.child_id(state(), pid)
 
-  @spec pid(id) :: {:ok, pid} | :error
-  def pid(id), do: State.pid(state(), id)
+  @spec child_pid(id) :: {:ok, pid} | :error
+  def child_pid(id), do: State.child_pid(state(), id)
 
-  @spec meta(id) :: {:ok, child_meta} | :error
-  def meta(id), do: State.meta(state(), id)
+  @spec child_meta(id) :: {:ok, child_meta} | :error
+  def child_meta(id), do: State.child_meta(state(), id)
 
-  @spec update_meta(id, (child_meta -> child_meta)) :: :ok | :error
-  def update_meta(id, updater) do
-    with {:ok, new_state} <- State.update_meta(state(), id, updater) do
+  @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
+  def update_child_meta(id, updater) do
+    with {:ok, new_state} <- State.update_child_meta(state(), id, updater) do
       store(new_state)
       :ok
     end
