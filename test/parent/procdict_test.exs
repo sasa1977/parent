@@ -4,6 +4,49 @@ defmodule Parent.ProcdictTest do
   alias Parent.Procdict
   import Parent.ChildSpecGenerators
 
+  test "shutting down a child which refuses to stop" do
+    init()
+
+    stubborn_child = %{
+      id: :stubborn_child,
+      start: fn ->
+        Task.start_link(fn ->
+          Process.flag(:trap_exit, true)
+          Process.sleep(:infinity)
+        end)
+      end,
+      shutdown: 100
+    }
+
+    normal_child = %{id: :normal_child, start: fn -> Agent.start_link(fn -> :ok end) end}
+
+    {:ok, stubborn_pid} = Procdict.start_child(stubborn_child)
+    {:ok, normal_pid} = Procdict.start_child(normal_child)
+
+    Procdict.shutdown_all(:shutdown)
+
+    assert Procdict.size() == 0
+    refute Process.alive?(stubborn_pid)
+    refute Process.alive?(normal_pid)
+  end
+
+  test "child timeout" do
+    init()
+
+    {:ok, child_pid} =
+      Procdict.start_child(%{
+        id: :child,
+        start: fn -> Agent.start_link(fn -> :ok end) end,
+        timeout: 1,
+        meta: :timeout_meta
+      })
+
+    assert_receive {Parent.Functional, :child_timeout, ^child_pid} = message
+    assert Procdict.handle_message(message) == {:EXIT, child_pid, :child, :timeout_meta, :timeout}
+    assert Procdict.size() == 0
+    refute Process.alive?(child_pid)
+  end
+
   test "awaits child termination" do
     init()
 
@@ -43,6 +86,21 @@ defmodule Parent.ProcdictTest do
     end
   end
 
+  property "processes which fail to start are not registered" do
+    check all child_specs <- child_specs(failed_child_spec()) do
+      init()
+
+      Enum.each(
+        child_specs,
+        fn spec ->
+          assert Procdict.start_child(spec) == {:error, :not_started}
+          assert Procdict.size() == 0
+          assert Procdict.pid(spec.id) == :error
+        end
+      )
+    end
+  end
+
   property "handling of exit messages" do
     check all exit_data <- exit_data() do
       init()
@@ -60,6 +118,13 @@ defmodule Parent.ProcdictTest do
         assert Procdict.pid(id(child_spec)) == :error
         assert Procdict.id(pid) == :error
       end)
+    end
+  end
+
+  property "handling of other messages" do
+    check all message <- one_of([term(), constant({:EXIT, self(), :normal})]) do
+      init()
+      assert Procdict.handle_message(message) == :error
     end
   end
 
