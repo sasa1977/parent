@@ -46,8 +46,7 @@ defmodule Parent do
   @type child_id :: term
   @type child_meta :: term
 
-  @type start :: (() -> on_start_child) | {module, atom, [term]}
-  @type on_start_child :: on_start_child
+  @type start :: (() -> Supervisor.on_start_child()) | {module, atom, [term]}
 
   @type shutdown :: non_neg_integer() | :infinity | :brutal_kill
 
@@ -74,7 +73,7 @@ defmodule Parent do
   def initialized?(), do: not is_nil(Process.get(__MODULE__))
 
   @doc "Starts the child described by the specification."
-  @spec start_child(child_spec | module | {module, term}) :: on_start_child
+  @spec start_child(child_spec | module | {module, term}) :: Supervisor.on_start_child()
   def start_child(child_spec) do
     with result <- State.start_child(state(), child_spec),
          {:ok, pid, state} <- result do
@@ -216,7 +215,7 @@ defmodule Parent do
   @spec state() :: State.t()
   defp state() do
     state = Process.get(__MODULE__)
-    if is_nil(state), do: raise("#{__MODULE__} is not initialized")
+    if is_nil(state), do: raise("Parent is not initialized")
     state
   end
 
