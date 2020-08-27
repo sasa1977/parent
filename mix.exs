@@ -42,7 +42,7 @@ defmodule Parent.MixProject do
   defp docs() do
     [
       extras: ["RATIONALE.md"],
-      main: "Parent.GenServer",
+      main: "Parent",
       source_url: "https://github.com/sasa1977/parent/",
       source_ref: @version,
       groups_for_modules: [

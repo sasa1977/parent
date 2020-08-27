@@ -1,5 +1,36 @@
 defmodule Parent do
-  @moduledoc false
+  @moduledoc """
+  Functions for implementing a parent process.
+
+  A parent process has the following properties:
+
+  1. It traps exits.
+  2. It tracks its children inside the process dictionary.
+  3. Before terminating, it stops its children synchronously, in the reverse startup order.
+
+  In most cases the simplest option is to start a parent process using a higher-level abstraction
+  such as `Parent.GenServer`. In this case you will use a subset of the API from this module to
+  start, stop, and enumerate your children.
+
+  If available parent behaviours don't fit your purposes, you can consider building your own
+  behaviour or a concrete process. In this case, the functions of this module will provide the
+  necessary plumbing. To implement a parent process you need to do the following:
+
+  1. Invoke `initialize/0` when the process is started.
+  2. Use functions such as `start_child/1` to work with child processes.
+  3. When a message is received, invoke `handle_message/1` before handling the message yourself.
+  4. If you receive a shutdown exit message from your parent, stop the process.
+  5. Before terminating, invoke `shutdown_all/1` to stop all the children.
+  6. Use `:infinity` as the shutdown strategy for the parent process, and `:supervisor` for its type.
+  7. If the process is a `GenServer`, handle supervisor calls (see `supervisor_which_children/0`
+     and `supervisor_count_children/0`).
+  8. Implement `format_status/2` (see `Parent.GenServer` for details) where applicable.
+
+  If the parent process is powered by a non-interactive code (e.g. `Task`), make sure
+  to receive messages sent to that process, and handle them properly (see points 3 and 4).
+
+  You can take a look at the code of `Parent.GenServer` for specific details.
+  """
   alias Parent.State
   use Parent.PublicTypes
 
@@ -112,9 +143,13 @@ defmodule Parent do
   @doc """
   Should be invoked by the behaviour when handling `:which_children` GenServer call.
 
-  You only need to invoke this function if you're implementing a generic behaviour which can
-  handle `GenServer` calls. Alternatively, if you're handling all messages yourself, this
-  function will be automatically invoked through `handle_message/1`.
+  You only need to invoke this function if you're implementing a parent process using a behaviour
+  which forwards `GenServer` call messages to the `handle_call` callback. In such cases you need
+  to respond to the client with the result of this function. Note that parent behaviours such as
+  `Parent.GenServer` will do this automatically.
+
+  If no translation of `GenServer` messages is taking place, i.e. if you're handling all messages
+  in their original shape, this function will be invoked through `handle_message/1`.
   """
   @spec supervisor_which_children() :: [{term(), pid(), :worker, [module()] | :dynamic}]
   def supervisor_which_children(), do: State.supervisor_which_children(state())
@@ -122,9 +157,7 @@ defmodule Parent do
   @doc """
   Should be invoked by the behaviour when handling `:count_children` GenServer call.
 
-  You only need to invoke this function if you're implementing a generic behaviour which can
-  handle `GenServer` calls. Alternatively, if you're handling all messages yourself, this
-  function will be automatically invoked through `handle_message/1`.
+  See `supervisor_which_children/0` for details.
   """
   @spec supervisor_count_children() :: [
           specs: non_neg_integer,
