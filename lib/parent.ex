@@ -103,7 +103,7 @@ defmodule Parent do
   have been started in.
   """
   @spec shutdown_all(term) :: :ok
-  def shutdown_all(reason) do
+  def shutdown_all(reason \\ :shutdown) do
     state = State.shutdown_all(state(), reason)
     store(state)
     :ok

@@ -39,7 +39,7 @@ defmodule Demo.Queue do
 
   defp maybe_start_next_job(state) do
     with max_jobs = 10,
-         true <- Parent.GenServer.num_children() < max_jobs,
+         true <- Parent.num_children() < max_jobs,
          {{:value, _item}, remaining} <- :queue.out(state.pending) do
       start_job()
       maybe_start_next_job(%{state | pending: remaining})
@@ -49,7 +49,7 @@ defmodule Demo.Queue do
   end
 
   defp start_job() do
-    Parent.GenServer.start_child(%{
+    Parent.start_child(%{
       id: make_ref(),
       start: {Task, :start_link, [&job/0]}
     })

@@ -15,7 +15,7 @@ defmodule Parent.GenServer do
     use Parent.GenServer
 
     def start_link(arg) do
-      Parent.GenServer.start_link(__MODULE__, arg, options \\\\ [])
+      Parent.start_link(__MODULE__, arg, options \\\\ [])
     end
   end
   ```
@@ -51,11 +51,11 @@ defmodule Parent.GenServer do
 
   ## Starting child processes
 
-  To start a child process, you can invoke `start_child/1` in the parent process:
+  To start a child process, you can invoke `Parent.start_child/1` in the parent process:
 
   ```
   def handle_call(...) do
-    Parent.GenServer.start_child(child_spec)
+    Parent.start_child(child_spec)
     ...
   end
   ```
@@ -74,7 +74,7 @@ defmodule Parent.GenServer do
   the result as `{:ok, pid}`. For example:
 
   ```
-  Parent.GenServer.start_child(%{
+  Parent.start_child(%{
     id: :hello_world,
     start: {Task, :start_link, [fn -> IO.puts "Hello, World!" end]}
   })
@@ -83,7 +83,7 @@ defmodule Parent.GenServer do
   You can also pass a zero-arity lambda for `:start`:
 
   ```
-  Parent.GenServer.start_child(%{
+  Parent.start_child(%{
     id: :hello_world,
     start: fn -> Task.start_link(fn -> IO.puts "Hello, World!" end) end
   })
@@ -117,9 +117,10 @@ defmodule Parent.GenServer do
 
   ## Working with child processes
 
-  This module provide various functions for managing child processes. For example,
-  you can enumerate running children with `children/0`, fetch child meta with
-  `child_meta/1`, or terminate a child process with `shutdown_child/1`.
+  The `Parent` module provides various functions for managing child processes.
+  For example, you can enumerate running children with `Parent.children/0`,
+  fetch child meta with `Parent.child_meta/1`, or terminate a child process with
+  `Parent.shutdown_child/1`.
 
   ## Termination
 
@@ -161,57 +162,37 @@ defmodule Parent.GenServer do
     GenServer.start_link(__MODULE__, {module, arg}, options)
   end
 
-  @doc "Starts the child described by the specification."
+  @deprecated "Use Parent.start_child/1 instead"
   defdelegate start_child(child_spec), to: Parent
 
-  @doc """
-  Terminates the child.
-
-  This function waits for the child to terminate. In the case of explicit
-  termination, `handle_child_terminated/5` will not be invoked.
-  """
+  @deprecated "Use Parent.shutdown_child/1 instead"
   defdelegate shutdown_child(child_id), to: Parent
 
-  @doc """
-  Terminates all running child processes.
-
-  Children are terminated synchronously, in the reverse order from the order they
-  have been started in.
-  """
+  @deprecated "Use Parent.shutdown_all/1 instead"
   defdelegate shutdown_all(reason \\ :shutdown), to: Parent
 
-  @doc "Returns the list of running child processes."
+  @deprecated "Use Parent.children/0 instead"
   defdelegate children(), to: Parent
 
-  @doc "Returns the count of running child processes."
+  @deprecated "Use Parent.num_children/0 instead"
   defdelegate num_children(), to: Parent
 
-  @doc "Returns the id of a child process with the given pid."
+  @deprecated "Use Parent.child_id/1 instead"
   defdelegate child_id(pid), to: Parent
 
-  @doc "Returns the pid of a child process with the given id."
+  @deprecated "Use Parent.child_pid/1 instead"
   defdelegate child_pid(id), to: Parent
 
-  @doc "Returns the meta associated with the given child id."
+  @deprecated "Use Parent.child_meta/1 instead"
   defdelegate child_meta(id), to: Parent
 
-  @doc "Updates the meta of the given child process."
+  @deprecated "Use Parent.update_child_meta/2 instead"
   defdelegate update_child_meta(id, updater), to: Parent
 
-  @doc """
-  Awaits for the child to terminate.
-
-  If the function succeeds, `handle_child_terminated/5` will not be invoked.
-  """
+  @deprecated "Use Parent.await_child_termination/2 instead"
   defdelegate await_child_termination(id, timeout), to: Parent
 
-  @doc """
-  Returns true if the child process is still running, false otherwise.
-
-  Note that this function might return true even if the child has terminated.
-  This can happen if the corresponding `:EXIT` message still hasn't been
-  processed.
-  """
+  @deprecated "Use Parent.child?/1 instead"
   defdelegate child?(id), to: Parent
 
   @impl GenServer

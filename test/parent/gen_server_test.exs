@@ -44,11 +44,11 @@ defmodule Parent.GenServerTest do
         meta = {child_id, :meta}
         child_spec = %{id: child_id, start: {Agent, :start_link, [fn -> nil end]}, meta: meta}
 
-        res = Parent.GenServer.start_child(child_spec)
+        res = Parent.start_child(child_spec)
         assert {:ok, pid} = res
-        assert Parent.GenServer.child_id(pid) == {:ok, child_id}
-        assert Parent.GenServer.child_pid(child_id) == {:ok, pid}
-        assert Parent.GenServer.child_meta(child_id) == {:ok, meta}
+        assert Parent.child_id(pid) == {:ok, child_id}
+        assert Parent.child_pid(child_id) == {:ok, pid}
+        assert Parent.child_meta(child_id) == {:ok, meta}
         res
       end)
 
@@ -120,7 +120,7 @@ defmodule Parent.GenServerTest do
 
     change =
       record_child_change(pid, child.id, fn ->
-        Parent.GenServer.await_child_termination(child.id, 1000)
+        Parent.await_child_termination(child.id, 1000)
       end)
 
     assert change.result == {child.pid, child.meta, :normal}
@@ -138,7 +138,7 @@ defmodule Parent.GenServerTest do
   test "shutdown_all" do
     {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
     Enum.each(1..100, &start_child(pid, %{id: &1, start: {Agent, :start_link, [fn -> :ok end]}}))
-    change = record_child_change(pid, nil, fn -> Parent.GenServer.shutdown_all() end)
+    change = record_child_change(pid, nil, fn -> Parent.shutdown_all() end)
 
     assert change.after.num_children == 0
     Enum.each(change.before.children, fn {_id, pid, _meta} -> refute Process.alive?(pid) end)
@@ -152,8 +152,8 @@ defmodule Parent.GenServerTest do
 
     TestServer.call(pid, fn state ->
       meta_updater = &{:updated, &1}
-      assert :ok = Parent.GenServer.update_child_meta(child_id, meta_updater)
-      assert Parent.GenServer.child_meta(child_id) == {:ok, meta_updater.(meta)}
+      assert :ok = Parent.update_child_meta(child_id, meta_updater)
+      assert Parent.child_meta(child_id) == {:ok, meta_updater.(meta)}
       {:ok, state}
     end)
   end
@@ -209,11 +209,11 @@ defmodule Parent.GenServerTest do
 
   defp parent_info(child_id) do
     %{
-      children: Parent.GenServer.children(),
+      children: Parent.children(),
       terminated_jobs: TestServer.terminated_jobs(),
-      num_children: Parent.GenServer.num_children(),
-      child_pid: Parent.GenServer.child_pid(child_id),
-      child?: Parent.GenServer.child?(child_id)
+      num_children: Parent.num_children(),
+      child_pid: Parent.child_pid(child_id),
+      child?: Parent.child?(child_id)
     }
   end
 
@@ -222,7 +222,7 @@ defmodule Parent.GenServerTest do
     child_spec = Map.merge(%{id: id, meta: {id, :meta}}, child_spec)
 
     TestServer.call(parent_pid, fn state ->
-      {:ok, child_pid} = Parent.GenServer.start_child(child_spec)
+      {:ok, child_pid} = Parent.start_child(child_spec)
       {%{id: child_spec.id, pid: child_pid, meta: child_spec.meta}, state}
     end)
   end

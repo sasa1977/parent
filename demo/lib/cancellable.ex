@@ -7,7 +7,7 @@ defmodule Demo.Cancellable do
 
   @impl GenServer
   def init(_) do
-    Parent.GenServer.start_child(%{
+    Parent.start_child(%{
       id: :job,
       start: {Task, :start_link, [&job/0]}
     })
