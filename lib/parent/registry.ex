@@ -1,10 +1,9 @@
 defmodule Parent.Registry do
   @moduledoc false
-  use Parent.PublicTypes
 
-  @opaque t :: %{id_to_pid: %{id => pid}, processes: entries}
-  @type entries :: %{pid => %{id: id, data: data}}
-  @type data :: map
+  @opaque t :: %{id_to_pid: %{Parent.child_id() => pid}, processes: entries}
+  @type entries :: %{pid => %{id: Parent.child_id(), data: data}}
+  @type data :: term
 
   @spec new() :: t
   def new(), do: %{id_to_pid: %{}, processes: %{}}
@@ -15,7 +14,7 @@ defmodule Parent.Registry do
   @spec size(t) :: non_neg_integer
   def size(registry), do: registry |> entries() |> Enum.count()
 
-  @spec id(t, pid) :: {:ok, id} | :error
+  @spec id(t, pid) :: {:ok, Parent.child_id()} | :error
   def id(registry, pid) do
     with {:ok, process} <- Map.fetch(registry.processes, pid), do: {:ok, process.id}
   end
@@ -25,10 +24,10 @@ defmodule Parent.Registry do
     with {:ok, process} <- Map.fetch(registry.processes, pid), do: {:ok, process.data}
   end
 
-  @spec pid(t, id) :: {:ok, pid} | :error
+  @spec pid(t, Parent.child_id()) :: {:ok, pid} | :error
   def pid(registry, id), do: Map.fetch(registry.id_to_pid, id)
 
-  @spec register(t, id, pid, data) :: t
+  @spec register(t, Parent.child_id(), pid, data) :: t
   def register(registry, id, pid, data) do
     if match?(%{processes: %{^pid => _}}, registry),
       do: raise("process #{inspect(pid)} is already registered")
@@ -41,7 +40,7 @@ defmodule Parent.Registry do
     |> put_in([:processes, pid], %{id: id, data: data})
   end
 
-  @spec pop(t, pid) :: {:ok, id, data, t} | :error
+  @spec pop(t, pid) :: {:ok, Parent.child_id(), data, t} | :error
   def pop(registry, pid) do
     with {:ok, process} <- Map.fetch(registry.processes, pid) do
       {:ok, process.id, process.data,

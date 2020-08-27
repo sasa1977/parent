@@ -32,7 +32,28 @@ defmodule Parent do
   You can take a look at the code of `Parent.GenServer` for specific details.
   """
   alias Parent.State
-  use Parent.PublicTypes
+
+  @type child_spec :: %{
+          :id => child_id,
+          :start => start,
+          optional(:modules) => [module] | :dynamic,
+          optional(:type) => :worker | :supervisor,
+          optional(:meta) => child_meta,
+          optional(:shutdown) => shutdown,
+          optional(:timeout) => pos_integer | :infinity
+        }
+
+  @type child_id :: term
+  @type child_meta :: term
+
+  @type start :: (() -> on_start_child) | {module, atom, [term]}
+  @type on_start_child :: on_start_child
+
+  @type shutdown :: non_neg_integer() | :infinity | :brutal_kill
+
+  @type child :: {child_id, pid, child_meta}
+
+  @type handle_message_response :: {:EXIT, pid, child_id, child_meta, reason :: term} | :ignore
 
   @doc """
   Initializes the state of the parent process.
@@ -68,7 +89,7 @@ defmodule Parent do
   This function waits for the child to terminate. In the case of explicit
   termination, `handle_child_terminated/5` will not be invoked.
   """
-  @spec shutdown_child(id) :: :ok
+  @spec shutdown_child(child_id) :: :ok
   def shutdown_child(child_id) do
     state = State.shutdown_child(state(), child_id)
     store(state)
@@ -104,7 +125,7 @@ defmodule Parent do
 
   Note that you don't need to invoke this function in a `Parent.GenServer` callback module.
   """
-  @spec handle_message(term) :: State.handle_message_response() | nil
+  @spec handle_message(term) :: handle_message_response() | nil
   def handle_message(message) do
     with {result, state} <- State.handle_message(state(), message) do
       store(state)
@@ -117,7 +138,7 @@ defmodule Parent do
 
   If the function succeeds, `handle_child_terminated/5` will not be invoked.
   """
-  @spec await_child_termination(id, non_neg_integer() | :infinity) ::
+  @spec await_child_termination(child_id, non_neg_integer() | :infinity) ::
           {pid, child_meta, reason :: term} | :timeout
   def await_child_termination(child_id, timeout) do
     with {result, state} <- State.await_child_termination(state(), child_id, timeout) do
@@ -137,7 +158,7 @@ defmodule Parent do
   This can happen if the corresponding `:EXIT` message still hasn't been
   processed.
   """
-  @spec child?(id) :: boolean
+  @spec child?(child_id) :: boolean
   def child?(id), do: match?({:ok, _}, child_pid(id))
 
   @doc """
@@ -172,19 +193,19 @@ defmodule Parent do
   def num_children(), do: State.num_children(state())
 
   @doc "Returns the id of a child process with the given pid."
-  @spec child_id(pid) :: {:ok, id} | :error
+  @spec child_id(pid) :: {:ok, child_id} | :error
   def child_id(pid), do: State.child_id(state(), pid)
 
   @doc "Returns the pid of a child process with the given id."
-  @spec child_pid(id) :: {:ok, pid} | :error
+  @spec child_pid(child_id) :: {:ok, pid} | :error
   def child_pid(id), do: State.child_pid(state(), id)
 
   @doc "Returns the meta associated with the given child id."
-  @spec child_meta(id) :: {:ok, child_meta} | :error
+  @spec child_meta(child_id) :: {:ok, child_meta} | :error
   def child_meta(id), do: State.child_meta(state(), id)
 
   @doc "Updates the meta of the given child process."
-  @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
+  @spec update_child_meta(child_id, (child_meta -> child_meta)) :: :ok | :error
   def update_child_meta(id, updater) do
     with {:ok, new_state} <- State.update_child_meta(state(), id, updater) do
       store(new_state)

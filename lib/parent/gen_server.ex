@@ -139,12 +139,17 @@ defmodule Parent.GenServer do
   the hot code reload process.
   """
   use GenServer
-  use Parent.PublicTypes
 
   @type state :: term
 
   @doc "Invoked when a child has terminated."
-  @callback handle_child_terminated(id, child_meta, pid, reason :: term, state) ::
+  @callback handle_child_terminated(
+              Parent.child_id(),
+              Parent.child_meta(),
+              pid,
+              reason :: term,
+              state
+            ) ::
               {:noreply, new_state}
               | {:noreply, new_state, timeout | :hibernate}
               | {:stop, reason :: term, new_state}
@@ -157,7 +162,6 @@ defmodule Parent.GenServer do
   end
 
   @doc "Starts the child described by the specification."
-  @spec start_child(child_spec | module | {module, term}) :: on_start_child
   defdelegate start_child(child_spec), to: Parent
 
   @doc """
@@ -166,7 +170,6 @@ defmodule Parent.GenServer do
   This function waits for the child to terminate. In the case of explicit
   termination, `handle_child_terminated/5` will not be invoked.
   """
-  @spec shutdown_child(id) :: :ok
   defdelegate shutdown_child(child_id), to: Parent
 
   @doc """
@@ -175,31 +178,24 @@ defmodule Parent.GenServer do
   Children are terminated synchronously, in the reverse order from the order they
   have been started in.
   """
-  @spec shutdown_all(reason :: term) :: :ok
   defdelegate shutdown_all(reason \\ :shutdown), to: Parent
 
   @doc "Returns the list of running child processes."
-  @spec children :: [child]
   defdelegate children(), to: Parent
 
   @doc "Returns the count of running child processes."
-  @spec num_children() :: non_neg_integer
   defdelegate num_children(), to: Parent
 
   @doc "Returns the id of a child process with the given pid."
-  @spec child_id(pid) :: {:ok, id} | :error
   defdelegate child_id(pid), to: Parent
 
   @doc "Returns the pid of a child process with the given id."
-  @spec child_pid(id) :: {:ok, pid} | :error
   defdelegate child_pid(id), to: Parent
 
   @doc "Returns the meta associated with the given child id."
-  @spec child_meta(id) :: {:ok, child_meta} | :error
   defdelegate child_meta(id), to: Parent
 
   @doc "Updates the meta of the given child process."
-  @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
   defdelegate update_child_meta(id, updater), to: Parent
 
   @doc """
@@ -207,8 +203,6 @@ defmodule Parent.GenServer do
 
   If the function succeeds, `handle_child_terminated/5` will not be invoked.
   """
-  @spec await_child_termination(id, non_neg_integer() | :infinity) ::
-          {pid, child_meta, reason :: term} | :timeout
   defdelegate await_child_termination(id, timeout), to: Parent
 
   @doc """
@@ -218,7 +212,6 @@ defmodule Parent.GenServer do
   This can happen if the corresponding `:EXIT` message still hasn't been
   processed.
   """
-  @spec child?(id) :: boolean
   defdelegate child?(id), to: Parent
 
   @impl GenServer

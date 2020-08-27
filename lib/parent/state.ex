@@ -1,11 +1,9 @@
 defmodule Parent.State do
   @moduledoc false
   alias Parent.Registry
-  use Parent.PublicTypes
 
   @opaque t :: %{registry: Registry.t(), startup_index: non_neg_integer}
-  @type on_handle_message :: {handle_message_response, t} | nil
-  @type handle_message_response :: {:EXIT, pid, id, child_meta, reason :: term} | :ignore
+  @type on_handle_message :: {Parent.handle_message_response(), t} | nil
 
   @spec initialize() :: t
   def initialize() do
@@ -13,7 +11,7 @@ defmodule Parent.State do
     %{registry: Registry.new(), startup_index: 0}
   end
 
-  @spec children(t) :: [child]
+  @spec children(t) :: [Parent.child()]
   def children(state) do
     state.registry
     |> Registry.entries()
@@ -53,20 +51,21 @@ defmodule Parent.State do
   @spec num_children(t) :: non_neg_integer
   def num_children(state), do: Registry.size(state.registry)
 
-  @spec child_id(t, pid) :: {:ok, id} | :error
+  @spec child_id(t, pid) :: {:ok, Parent.child_id()} | :error
   def child_id(state, pid), do: Registry.id(state.registry, pid)
 
-  @spec child_pid(t, id) :: {:ok, pid} | :error
+  @spec child_pid(t, Parent.child_id()) :: {:ok, pid} | :error
   def child_pid(state, id), do: Registry.pid(state.registry, id)
 
-  @spec child_meta(t, id) :: {:ok, child_meta} | :error
+  @spec child_meta(t, Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
   def child_meta(state, id) do
     with {:ok, pid} <- Registry.pid(state.registry, id),
          {:ok, data} <- Registry.data(state.registry, pid),
          do: {:ok, data.meta}
   end
 
-  @spec update_child_meta(t, id, (child_meta -> child_meta)) :: {:ok, t} | :error
+  @spec update_child_meta(t, Parent.child_id(), (Parent.child_meta() -> Parent.child_meta())) ::
+          {:ok, t} | :error
   def update_child_meta(state, id, updater) do
     with {:ok, pid} <- Registry.pid(state.registry, id),
          {:ok, updated_registry} <-
@@ -74,7 +73,7 @@ defmodule Parent.State do
          do: {:ok, %{state | registry: updated_registry}}
   end
 
-  @spec start_child(t, child_spec | module | {module, term}) :: {:ok, pid, t} | term
+  @spec start_child(t, Parent.child_spec() | module | {module, term}) :: {:ok, pid, t} | term
   def start_child(state, child_spec) do
     full_child_spec = expand_child_spec(child_spec)
 
@@ -100,7 +99,7 @@ defmodule Parent.State do
     end
   end
 
-  @spec shutdown_child(t, id) :: t
+  @spec shutdown_child(t, Parent.child_id()) :: t
   def shutdown_child(state, child_id) do
     case Registry.pid(state.registry, child_id) do
       :error -> raise "trying to terminate an unknown child"
@@ -138,8 +137,8 @@ defmodule Parent.State do
 
   def handle_message(_state, _other), do: nil
 
-  @spec await_child_termination(t, id, non_neg_integer() | :infinity) ::
-          {{pid, child_meta, reason :: term}, t} | :timeout
+  @spec await_child_termination(t, Parent.child_id(), non_neg_integer() | :infinity) ::
+          {{pid, Parent.child_meta(), reason :: term}, t} | :timeout
   def await_child_termination(state, child_id, timeout) do
     case Registry.pid(state.registry, child_id) do
       :error ->
