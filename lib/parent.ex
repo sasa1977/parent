@@ -64,6 +64,7 @@ defmodule Parent do
   @spec initialize() :: :ok
   def initialize() do
     if initialized?(), do: raise("Parent state is already initialized")
+    Process.flag(:trap_exit, true)
     Process.put(__MODULE__, State.initialize())
     :ok
   end
