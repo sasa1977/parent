@@ -65,8 +65,7 @@ defmodule Parent do
   def initialize() do
     if initialized?(), do: raise("Parent state is already initialized")
     Process.flag(:trap_exit, true)
-    Process.put(__MODULE__, State.initialize())
-    :ok
+    store(State.initialize())
   end
 
   @doc "Returns true if the parent state is initialized."
@@ -76,9 +75,21 @@ defmodule Parent do
   @doc "Starts the child described by the specification."
   @spec start_child(child_spec | module | {module, term}) :: Supervisor.on_start_child()
   def start_child(child_spec) do
-    with result <- State.start_child(state(), child_spec),
-         {:ok, pid, state} <- result do
-      store(state)
+    state = state()
+
+    full_child_spec = expand_child_spec(child_spec)
+
+    with {:ok, pid} <- start_child_process(full_child_spec.start) do
+      timer_ref =
+        case full_child_spec.timeout do
+          :infinity -> nil
+          timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
+        end
+
+      state
+      |> State.register_child(pid, full_child_spec, timer_ref)
+      |> store()
+
       {:ok, pid}
     end
   end
@@ -91,9 +102,17 @@ defmodule Parent do
   """
   @spec shutdown_child(child_id) :: :ok
   def shutdown_child(child_id) do
-    state = State.shutdown_child(state(), child_id)
-    store(state)
-    :ok
+    state = state()
+
+    case State.child_pid(state, child_id) do
+      :error ->
+        raise "trying to terminate an unknown child"
+
+      {:ok, pid} ->
+        {:ok, child, state} = State.pop(state, pid)
+        do_shutdown_child(child, :shutdown)
+        store(state)
+    end
   end
 
   @doc """
@@ -104,9 +123,14 @@ defmodule Parent do
   """
   @spec shutdown_all(term) :: :ok
   def shutdown_all(reason \\ :shutdown) do
-    state = State.shutdown_all(state(), reason)
-    store(state)
-    :ok
+    reason = with :normal <- reason, do: :shutdown
+
+    state()
+    |> State.children()
+    |> Enum.sort_by(& &1.startup_index, &>=/2)
+    |> Enum.each(&do_shutdown_child(&1, reason))
+
+    store(State.initialize())
   end
 
   @doc """
@@ -127,7 +151,7 @@ defmodule Parent do
   """
   @spec handle_message(term) :: handle_message_response() | nil
   def handle_message(message) do
-    with {result, state} <- State.handle_message(state(), message) do
+    with {result, state} <- do_handle_message(state(), message) do
       store(state)
       result
     end
@@ -141,15 +165,29 @@ defmodule Parent do
   @spec await_child_termination(child_id, non_neg_integer() | :infinity) ::
           {pid, child_meta, reason :: term} | :timeout
   def await_child_termination(child_id, timeout) do
-    with {result, state} <- State.await_child_termination(state(), child_id, timeout) do
-      store(state)
-      result
+    state = state()
+
+    case State.child_pid(state, child_id) do
+      :error ->
+        raise "unknown child"
+
+      {:ok, pid} ->
+        receive do
+          {:EXIT, ^pid, reason} ->
+            {:ok, %{id: ^child_id} = child, state} = State.pop(state, pid)
+            kill_timer(child.timer_ref, pid)
+            store(state)
+            {pid, child.meta, reason}
+        after
+          timeout -> :timeout
+        end
     end
   end
 
   @doc "Returns the list of running child processes."
   @spec children :: [child]
-  def children(), do: State.children(state())
+  def children(),
+    do: Enum.map(State.children(state()), &{&1.id, &1.pid, &1.meta})
 
   @doc """
   Returns true if the child process is still running, false otherwise.
@@ -173,7 +211,11 @@ defmodule Parent do
   in their original shape, this function will be invoked through `handle_message/1`.
   """
   @spec supervisor_which_children() :: [{term(), pid(), :worker, [module()] | :dynamic}]
-  def supervisor_which_children(), do: State.supervisor_which_children(state())
+  def supervisor_which_children() do
+    state()
+    |> State.children()
+    |> Enum.map(&{&1.id, &1.pid, &1.type, &1.modules})
+  end
 
   @doc """
   Should be invoked by the behaviour when handling `:count_children` GenServer call.
@@ -186,7 +228,22 @@ defmodule Parent do
           supervisors: non_neg_integer,
           workers: non_neg_integer
         ]
-  def supervisor_count_children(), do: State.supervisor_count_children(state())
+  def supervisor_count_children() do
+    Enum.reduce(
+      State.children(state()),
+      %{specs: 0, active: 0, supervisors: 0, workers: 0},
+      fn child, acc ->
+        %{
+          acc
+          | specs: acc.specs + 1,
+            active: acc.active + 1,
+            workers: acc.workers + if(child.type == :worker, do: 1, else: 0),
+            supervisors: acc.supervisors + if(child.type == :supervisor, do: 1, else: 0)
+        }
+      end
+    )
+    |> Map.to_list()
+  end
 
   @doc "Returns the count of running child processes."
   @spec num_children() :: non_neg_integer
@@ -207,9 +264,97 @@ defmodule Parent do
   @doc "Updates the meta of the given child process."
   @spec update_child_meta(child_id, (child_meta -> child_meta)) :: :ok | :error
   def update_child_meta(id, updater) do
-    with {:ok, new_state} <- State.update_child_meta(state(), id, updater) do
-      store(new_state)
-      :ok
+    with {:ok, new_state} <- State.update_child_meta(state(), id, updater),
+         do: store(new_state)
+  end
+
+  @default_spec %{meta: nil, timeout: :infinity}
+
+  defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, nil})
+  defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
+
+  defp expand_child_spec(%{} = child_spec) do
+    @default_spec
+    |> Map.merge(default_type_and_shutdown_spec(Map.get(child_spec, :type, :worker)))
+    |> Map.put(:modules, default_modules(child_spec.start))
+    |> Map.merge(child_spec)
+  end
+
+  defp expand_child_spec(_other), do: raise("invalid child_spec")
+
+  defp default_type_and_shutdown_spec(:worker), do: %{type: :worker, shutdown: :timer.seconds(5)}
+  defp default_type_and_shutdown_spec(:supervisor), do: %{type: :supervisor, shutdown: :infinity}
+
+  defp default_modules({mod, _fun, _args}), do: [mod]
+
+  defp default_modules(fun) when is_function(fun),
+    do: [fun |> :erlang.fun_info() |> Keyword.fetch!(:module)]
+
+  defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
+  defp start_child_process(fun) when is_function(fun, 0), do: fun.()
+
+  defp do_handle_message(state, {:EXIT, pid, reason}) do
+    case State.pop(state, pid) do
+      {:ok, child, state} ->
+        kill_timer(child.timer_ref, pid)
+        {{:EXIT, pid, child.id, child.meta, reason}, state}
+
+      :error ->
+        nil
+    end
+  end
+
+  defp do_handle_message(state, {__MODULE__, :child_timeout, pid}) do
+    {:ok, child, state} = State.pop(state, pid)
+    do_shutdown_child(child, :kill)
+    {{:EXIT, pid, child.id, child.meta, :timeout}, state}
+  end
+
+  defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
+    GenServer.reply(client, supervisor_which_children())
+    {:ignore, state}
+  end
+
+  defp do_handle_message(state, {:"$gen_call", client, :count_children}) do
+    GenServer.reply(client, supervisor_count_children())
+    {:ignore, state}
+  end
+
+  defp do_handle_message(_state, _other), do: nil
+
+  defp do_shutdown_child(child, reason) do
+    kill_timer(child.timer_ref, child.pid)
+
+    exit_signal = if child.shutdown == :brutal_kill, do: :kill, else: reason
+    wait_time = if exit_signal == :kill, do: :infinity, else: child.shutdown
+
+    sync_stop_process(child.pid, exit_signal, wait_time)
+  end
+
+  defp sync_stop_process(pid, exit_signal, wait_time) do
+    Process.exit(pid, exit_signal)
+
+    receive do
+      {:EXIT, ^pid, _reason} -> :ok
+    after
+      wait_time ->
+        Process.exit(pid, :kill)
+
+        receive do
+          {:EXIT, ^pid, _reason} -> :ok
+        end
+    end
+  end
+
+  defp kill_timer(nil, _pid), do: :ok
+
+  defp kill_timer(timer_ref, pid) do
+    Process.cancel_timer(timer_ref)
+
+    receive do
+      {Parent, :child_timeout, ^pid} -> :ok
+    after
+      0 -> :ok
     end
   end
 
@@ -220,5 +365,9 @@ defmodule Parent do
     state
   end
 
-  defp store(state), do: Process.put(__MODULE__, state)
+  @spec store(State.t()) :: :ok
+  defp store(state) do
+    Process.put(__MODULE__, state)
+    :ok
+  end
 end

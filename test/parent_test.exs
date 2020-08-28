@@ -361,7 +361,7 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child, meta: :meta, timeout: 0)
 
-      assert_receive {Parent.State, :child_timeout, ^child} = message
+      assert_receive {Parent, :child_timeout, ^child} = message
 
       assert Parent.handle_message(message) == {:EXIT, child, :child, :meta, :timeout}
 
