@@ -8,12 +8,8 @@ defmodule Parent.State do
           }
 
   @type child :: %{
-          id: Parent.child_id(),
+          spec: Parent.child_spec(),
           pid: pid,
-          shutdown: Parent.shutdown(),
-          meta: Parent.child_meta(),
-          type: :worker | :supervisor,
-          modules: [module] | :dynamic,
           timer_ref: reference() | nil,
           startup_index: non_neg_integer()
         }
@@ -24,12 +20,8 @@ defmodule Parent.State do
   @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
   def register_child(state, pid, full_child_spec, timer_ref) do
     child = %{
-      id: full_child_spec.id,
+      spec: full_child_spec,
       pid: pid,
-      shutdown: full_child_spec.shutdown,
-      meta: full_child_spec.meta,
-      type: full_child_spec.type,
-      modules: full_child_spec.modules,
       timer_ref: timer_ref,
       startup_index: state.startup_index
     }
@@ -51,7 +43,7 @@ defmodule Parent.State do
     with {:ok, child} <- Map.fetch(state.children, pid) do
       {:ok, child,
        state
-       |> update_in([:id_to_pid], &Map.delete(&1, child.id))
+       |> update_in([:id_to_pid], &Map.delete(&1, child.spec.id))
        |> update_in([:children], &Map.delete(&1, pid))}
     end
   end
@@ -61,7 +53,7 @@ defmodule Parent.State do
 
   @spec child_id(t, pid) :: {:ok, Parent.child_id()} | :error
   def child_id(state, pid) do
-    with {:ok, child} <- Map.fetch(state.children, pid), do: {:ok, child.id}
+    with {:ok, child} <- Map.fetch(state.children, pid), do: {:ok, child.spec.id}
   end
 
   @spec child_pid(t, Parent.child_id()) :: {:ok, pid} | :error
@@ -71,14 +63,14 @@ defmodule Parent.State do
   def child_meta(state, id) do
     with {:ok, pid} <- child_pid(state, id),
          {:ok, child} <- Map.fetch(state.children, pid),
-         do: {:ok, child.meta}
+         do: {:ok, child.spec.meta}
   end
 
   @spec update_child_meta(t, Parent.child_id(), (Parent.child_meta() -> Parent.child_meta())) ::
           {:ok, t} | :error
   def update_child_meta(state, id, updater) do
     with {:ok, pid} <- child_pid(state, id),
-         do: update(state, pid, &update_in(&1.meta, updater))
+         do: update(state, pid, &update_in(&1.spec.meta, updater))
   end
 
   defp update(state, pid, updater) do

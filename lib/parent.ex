@@ -175,10 +175,10 @@ defmodule Parent do
       {:ok, pid} ->
         receive do
           {:EXIT, ^pid, reason} ->
-            {:ok, %{id: ^child_id} = child, state} = State.pop(state, pid)
+            {:ok, %{spec: %{id: ^child_id}} = child, state} = State.pop(state, pid)
             kill_timer(child.timer_ref, pid)
             store(state)
-            {pid, child.meta, reason}
+            {pid, child.spec.meta, reason}
         after
           timeout -> :timeout
         end
@@ -188,7 +188,7 @@ defmodule Parent do
   @doc "Returns the list of running child processes."
   @spec children :: [child]
   def children(),
-    do: Enum.map(State.children(state()), &{&1.id, &1.pid, &1.meta})
+    do: Enum.map(State.children(state()), &{&1.spec.id, &1.pid, &1.spec.meta})
 
   @doc """
   Returns true if the child process is still running, false otherwise.
@@ -215,7 +215,7 @@ defmodule Parent do
   def supervisor_which_children() do
     state()
     |> State.children()
-    |> Enum.map(&{&1.id, &1.pid, &1.type, &1.modules})
+    |> Enum.map(&{&1.spec.id, &1.pid, &1.spec.type, &1.spec.modules})
   end
 
   @doc """
@@ -238,8 +238,8 @@ defmodule Parent do
           acc
           | specs: acc.specs + 1,
             active: acc.active + 1,
-            workers: acc.workers + if(child.type == :worker, do: 1, else: 0),
-            supervisors: acc.supervisors + if(child.type == :supervisor, do: 1, else: 0)
+            workers: acc.workers + if(child.spec.type == :worker, do: 1, else: 0),
+            supervisors: acc.supervisors + if(child.spec.type == :supervisor, do: 1, else: 0)
         }
       end
     )
@@ -305,7 +305,7 @@ defmodule Parent do
     case State.pop(state, pid) do
       {:ok, child, state} ->
         kill_timer(child.timer_ref, pid)
-        {{:EXIT, pid, child.id, child.meta, reason}, state}
+        {{:EXIT, pid, child.spec.id, child.spec.meta, reason}, state}
 
       :error ->
         nil
@@ -315,7 +315,7 @@ defmodule Parent do
   defp do_handle_message(state, {__MODULE__, :child_timeout, pid}) do
     {:ok, child, state} = State.pop(state, pid)
     do_shutdown_child(child, :kill)
-    {{:EXIT, pid, child.id, child.meta, :timeout}, state}
+    {{:EXIT, pid, child.spec.id, child.spec.meta, :timeout}, state}
   end
 
   defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
@@ -333,8 +333,8 @@ defmodule Parent do
   defp do_shutdown_child(child, reason) do
     kill_timer(child.timer_ref, child.pid)
 
-    exit_signal = if child.shutdown == :brutal_kill, do: :kill, else: reason
-    wait_time = if exit_signal == :kill, do: :infinity, else: child.shutdown
+    exit_signal = if child.spec.shutdown == :brutal_kill, do: :kill, else: reason
+    wait_time = if exit_signal == :kill, do: :infinity, else: child.spec.shutdown
 
     sync_stop_process(child.pid, exit_signal, wait_time)
   end
