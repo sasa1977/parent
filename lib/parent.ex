@@ -79,7 +79,8 @@ defmodule Parent do
 
     full_child_spec = expand_child_spec(child_spec)
 
-    with {:ok, pid} <- start_child_process(full_child_spec.start) do
+    with :ok <- validate_id(state, full_child_spec.id),
+         {:ok, pid} <- start_child_process(full_child_spec.start) do
       timer_ref =
         case full_child_spec.timeout do
           :infinity -> nil
@@ -289,6 +290,13 @@ defmodule Parent do
 
   defp default_modules(fun) when is_function(fun),
     do: [fun |> :erlang.fun_info() |> Keyword.fetch!(:module)]
+
+  defp validate_id(state, id) do
+    case State.child_pid(state, id) do
+      {:ok, pid} -> {:error, {:already_started, pid}}
+      :error -> :ok
+    end
+  end
 
   defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
   defp start_child_process(fun) when is_function(fun, 0), do: fun.()

@@ -22,7 +22,7 @@ defmodule Parent.State do
   def initialize(), do: %{id_to_pid: %{}, children: %{}, startup_index: 0}
 
   @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
-  def register_child(state, pid, %{id: id} = full_child_spec, timer_ref) do
+  def register_child(state, pid, full_child_spec, timer_ref) do
     child = %{
       id: full_child_spec.id,
       pid: pid,
@@ -34,14 +34,11 @@ defmodule Parent.State do
       startup_index: state.startup_index
     }
 
-    if match?(%{children: %{^pid => _}}, state),
-      do: raise("process #{inspect(pid)} is already registered")
-
-    if match?(%{id_to_pid: %{^id => _}}, state),
-      do: raise("id #{inspect(id)} is already taken")
+    false = Map.has_key?(state.children, pid)
+    false = Map.has_key?(state.id_to_pid, full_child_spec.id)
 
     state
-    |> put_in([:id_to_pid, id], pid)
+    |> put_in([:id_to_pid, full_child_spec.id], pid)
     |> put_in([:children, pid], child)
     |> update_in([:startup_index], &(&1 + 1))
   end

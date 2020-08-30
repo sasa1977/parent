@@ -67,8 +67,8 @@ defmodule ParentTest do
 
     test "fails if the id is already taken" do
       Parent.initialize()
-      assert {:ok, _child} = start_child(id: :child)
-      assert_raise RuntimeError, "id :child is already taken", fn -> start_child(id: :child) end
+      assert {:ok, child} = start_child(id: :child)
+      assert start_child(id: :child) == {:error, {:already_started, child}}
     end
 
     test "fails if the parent is not initialized" do

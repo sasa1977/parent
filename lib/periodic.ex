@@ -420,17 +420,17 @@ defmodule Periodic do
   defp start_job_process(state, opts) do
     job = state.run
 
-    with {:ok, pid} <-
-           Parent.start_child(%{
-             id: make_ref(),
-             start: {Task, :start_link, [fn -> invoke_job(job) end]},
-             timeout: state.timeout,
-             shutdown: state.job_shutdown,
-             meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
-           }) do
-      telemetry(state, :started, %{job: pid})
-      {:ok, pid}
-    end
+    {:ok, pid} =
+      Parent.start_child(%{
+        id: make_ref(),
+        start: {Task, :start_link, [fn -> invoke_job(job) end]},
+        timeout: state.timeout,
+        shutdown: state.job_shutdown,
+        meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
+      })
+
+    telemetry(state, :started, %{job: pid})
+    {:ok, pid}
   end
 
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
