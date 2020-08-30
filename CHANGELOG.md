@@ -1,3 +1,8 @@
+# 0.10.0
+
+- **[Deprecation]** - all `Parent.GenServer` functions except for `start_link` have been deprecated. Use equivalent functions from the `Parent` module instead.
+- The `Parent` module which provides plumbing for building custom parent processes and behaviours is now included in the public API.
+
 # 0.9.0
 
 - `Parent.GenServer` terminates children synchronously, in the reverse start order. The same change holds for `shutdown_all/1`.

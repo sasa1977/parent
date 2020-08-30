@@ -1,7 +1,7 @@
 defmodule Parent.MixProject do
   use Mix.Project
 
-  @version "0.9.0"
+  @version "0.10.0"
 
   def project do
     [
@@ -27,7 +27,6 @@ defmodule Parent.MixProject do
     [
       {:dialyxir, "~> 0.5", runtime: false, only: [:dev, :test]},
       {:ex_doc, "~> #{ex_doc_version()}", only: :dev, runtime: false},
-      {:stream_data, "~> 0.4", only: [:dev, :test]},
       {:telemetry, "~> 0.4"}
     ]
   end
@@ -42,7 +41,7 @@ defmodule Parent.MixProject do
   defp docs() do
     [
       extras: ["RATIONALE.md"],
-      main: "Parent.GenServer",
+      main: "Parent",
       source_url: "https://github.com/sasa1977/parent/",
       source_ref: @version,
       groups_for_modules: [

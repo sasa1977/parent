@@ -410,7 +410,7 @@ defmodule Periodic do
 
   defp start_job(%{on_overlap: :stop_previous} = state, opts) do
     with {:ok, pid} <- previous_instance() do
-      Parent.GenServer.shutdown_all(:kill)
+      Parent.shutdown_all(:kill)
       telemetry(state, :stopped_previous, %{pid: pid})
     end
 
@@ -420,24 +420,24 @@ defmodule Periodic do
   defp start_job_process(state, opts) do
     job = state.run
 
-    with {:ok, pid} <-
-           Parent.GenServer.start_child(%{
-             id: make_ref(),
-             start: {Task, :start_link, [fn -> invoke_job(job) end]},
-             timeout: state.timeout,
-             shutdown: state.job_shutdown,
-             meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
-           }) do
-      telemetry(state, :started, %{job: pid})
-      {:ok, pid}
-    end
+    {:ok, pid} =
+      Parent.start_child(%{
+        id: make_ref(),
+        start: {Task, :start_link, [fn -> invoke_job(job) end]},
+        timeout: state.timeout,
+        shutdown: state.job_shutdown,
+        meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
+      })
+
+    telemetry(state, :started, %{job: pid})
+    {:ok, pid}
   end
 
   defp invoke_job({mod, fun, args}), do: apply(mod, fun, args)
   defp invoke_job(fun) when is_function(fun, 0), do: fun.()
 
   defp previous_instance() do
-    case Parent.GenServer.children() do
+    case Parent.children() do
       [{_id, pid, _meta}] -> {:ok, pid}
       [] -> :error
     end

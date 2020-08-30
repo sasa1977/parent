@@ -6,7 +6,7 @@ Direct parenting requires the implementation to take some roles of the superviso
 
 While this is not very hard to implement (and I advise doing it for practice), it will lead to some boilerplate. I've personally encountered a couple of cases where I needed to code this from scratch, and it took some time and careful programming to get it right. The parent library is an attempt to extract the typical implementation into a common behaviour.
 
-Currently, the only provided behaviour is `Parent.GenServer`, which is basically a GenServer with built-in support for parenting. It's possible to create other behaviours (e.g. `Parent.GenStage` or `Parent.GenStatem`), but since I'm still not clear about the utility and the interface, I'm keeping the scope small for the moment.
+Currently, the only provided behaviour is `Parent.GenServer`, which is basically a GenServer with built-in support for parenting. It's possible to create other behaviours (e.g. `Parent.GenStage` or `Parent.GenStatem`), with the help of the `Parent` module.
 
 ## Parent.GenServer
 
@@ -26,7 +26,7 @@ Once the behaviour is used, you can work with your module as if it was a GenServ
 
 However, there are some differences: a server powered by `Parent.GenServer` by default traps exits. The behaviour will also take down all the known child processes on termination. Finally, the default version of injected `child_spec/1` uses `:infinity` as the shutdown value, and `:supervisor` as the child type.
 
-The principal feature of `Parent.GenServer` is the ability to start immediate child processes. This can be done with `start_child/1`, which must be invoked in the server process. The function takes a child specification as its single argument. The specification is a variation of a child spec map used with supervisors. In its full shape the child spec has the following type specification:
+The principal feature of `Parent.GenServer` is the ability to start managed child processes. This can be done with `Parent.start_child/1`, which must be invoked in the server process. The function takes a child specification as its single argument. The specification is a variation of a child spec map used with supervisors. In its full shape the child spec has the following type specification:
 
 ```elixir
 %{
@@ -49,7 +49,7 @@ defmodule MyParentServer do
 
   def init(_) do
     {:ok, _child_pid} =
-      Parent.GenServer.start_child(%{
+      Parent.start_child(%{
         id: :hello_world,
         start: {Task, :start_link, [fn -> IO.puts "Hello, World!" end]}
       })
@@ -61,19 +61,19 @@ end
 
 And now, to start the parent server, you can invoke `Parent.GenServer.start_link(MyParentServer, nil)`.
 
-Once a process is started, casts and calls are issued through Elixir's GenServer module. The `Parent.GenServer` module doesn't export any function which can be used to manipulate the parent server from the outside. So to reiterate: a `Parent.GenServer` is essentially a GenServer.
+Once a process is started, casts and calls are issued through Elixir's GenServer module. The `Parent.GenServer` module doesn't export any function which can be used to manipulate the parent server from the outside. So to reiterate: a `Parent.GenServer` is a GenServer.
 
-You might wonder what's the benefit of `start_child/1` vs plain `Task.start_link`. The first benefit is that any child started through `start_child/1` is known to the  behaviour. Therefore, while terminating, the behaviour will make sure to take all the child processes down. This guarantees that if the parent is taken down, the child processes will not be left lingering.
+You might wonder what's the benefit of `start_child/1` vs plain `Task.start_link`. The first benefit is that any child started through `start_child/1` is known to the behaviour. Therefore, while terminating, the behaviour will make sure to take all the child processes down. This guarantees that if the parent is taken down, the child processes will not be left lingering.
 
-Another benefit is that you can use other `Parent.GenServer` functions to work with child processes started with `start_child/1`. You can enumerate the child processes, fetch individual children by their id, and know the count of alive child processes. This is where `Parent.GenServer` serves as a kind of a unique registry.
+Another benefit is that you can use other `Parent` functions to work with child processes started with `start_child/1`. You can enumerate the child processes, fetch individual children by their id, and know the count of alive child processes. This is where `Parent` serves as a kind of a unique registry.
 
 Finally, if a child terminates, the behaviour will handle the corresponding `:EXIT` message, and convert it into the callback `handle_child_terminated(child_name :: term, meta :: term, pid, reason :: term, state)`. This is the only callback specific to `Parent.GenServer`.
 
-This pretty much covers the `Parent.GenServer` behaviour. In my opinion, it's a fairly lightweight variation of the standard GenServer, which makes it fairly easy to reason about (assuming the user is already familiar with GenServer). However, before looking at use cases, let's discuss one controversial implementation detail.
+This pretty much covers the `Parent.GenServer` behaviour. In my opinion, it's a relatively small variation of GenServer, which makes it fairly easy to reason about (assuming the user is already familiar with GenServer). However, before looking at use cases, let's discuss one controversial implementation detail.
 
 ### State management
 
-Careful readers might have noticed that the behaviour manages its state implicitly. When `Parent.GenServer.start_child/1` succeeds, the function returns `{:ok, pid}`, while the internal behaviour state is implicitly changed. In other words, `start_child/1` is a function with a side-effect.
+Careful readers might have noticed that the behaviour manages its state implicitly. When `Parent.start_child/1` succeeds, the function returns `{:ok, pid}`, while the internal behaviour state is implicitly changed. In other words, `start_child/1` is a function with a side-effect.
 
 The main reason why this approach is chosen is because starting of a child is by itself a side-effect operation. Thus, as soon as the new child is started, we want it to be included in other behaviour functions (e.g. when enumerating child processes or mapping a name to a pid). Using implicit state allows exactly this and leaves no place for mistakes. As an added bonus, the implicit state simplifies the interface of the callbacks, and allows `Parent.GenServer` to work exactly as a GenServer, which simplifies the transition to a parented version, and lowers the learning curve.
 
@@ -144,10 +144,10 @@ defmodule Demo.Periodic do
 
   @impl GenServer
   def handle_info(:run_job, state) do
-    if Parent.GenServer.child?(:job) do
+    if Parent.child?(:job) do
       IO.puts("previous job already running")
     else
-      Parent.GenServer.start_child(%{
+      Parent.start_child(%{
         id: :job,
         start: {Task, :start_link, [&job/0]}
       })
@@ -187,7 +187,7 @@ defmodule Demo.Cancellable do
 
   @impl GenServer
   def init(_) do
-    Parent.GenServer.start_child(%{
+    Parent.start_child(%{
       id: :job,
       start: {Task, :start_link, [&job/0]}
     })
@@ -279,7 +279,7 @@ defmodule Demo.Queue do
 
   defp maybe_start_next_job(state) do
     with max_jobs = 10,
-         true <- Parent.GenServer.num_children() < max_jobs,
+         true <- Parent.num_children() < max_jobs,
          {{:value, _item}, remaining} <- :queue.out(state.pending) do
       start_job()
       maybe_start_next_job(%{state | pending: remaining})
@@ -289,7 +289,7 @@ defmodule Demo.Queue do
   end
 
   defp start_job() do
-    Parent.GenServer.start_child(%{
+    Parent.start_child(%{
       id: make_ref(),
       start: {Task, :start_link, [&job/0]}
     })

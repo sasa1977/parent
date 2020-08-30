@@ -41,7 +41,7 @@ defmodule MyParent do
   defp start_job(job_number) do
     Logger.info("starting job #{job_number}")
 
-    Parent.GenServer.start_child(%{
+    Parent.start_child(%{
       id: :job,
       start: {Task, :start_link, [&run_job/0]},
       meta: job_number

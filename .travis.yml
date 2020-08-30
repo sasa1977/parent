@@ -3,8 +3,12 @@ matrix:
   include:
     - otp_release: 20.1
       elixir: 1.6
+      env:
+        - CHECK_FORMAT=false
     - otp_release: 22.0
       elixir: 1.10
+      env:
+        - CHECK_FORMAT=true
 env:
   global:
     - MIX_HOME=$HOME/.mix
@@ -19,5 +23,5 @@ script:
   - MIX_ENV=prod mix compile --warnings-as-errors
   - mix docs
   - mix test
-  - mix format --check-formatted
+  - if [ "$CHECK_FORMAT" == "true" ]; then mix format --check-formatted; fi
   - travis_wait 30 mix dialyzer

@@ -23,11 +23,11 @@ defmodule BufferBatching.Consumer do
       else: buffer
   end
 
-  defp idle?(), do: Parent.GenServer.num_children() == 0
+  defp idle?(), do: Parent.num_children() == 0
   defp buffer_full?(buffer), do: Enum.count(buffer) >= Config.max_buffer_size()
 
   defp start_processor(buffer) do
-    Parent.GenServer.start_child(%{
+    Parent.start_child(%{
       id: make_ref(),
       start: {Task, :start_link, [fn -> process_buffer(buffer) end]}
     })

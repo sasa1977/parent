@@ -15,7 +15,7 @@ defmodule Parent.GenServer do
     use Parent.GenServer
 
     def start_link(arg) do
-      Parent.GenServer.start_link(__MODULE__, arg, options \\\\ [])
+      Parent.start_link(__MODULE__, arg, options \\\\ [])
     end
   end
   ```
@@ -51,11 +51,11 @@ defmodule Parent.GenServer do
 
   ## Starting child processes
 
-  To start a child process, you can invoke `start_child/1` in the parent process:
+  To start a child process, you can invoke `Parent.start_child/1` in the parent process:
 
   ```
   def handle_call(...) do
-    Parent.GenServer.start_child(child_spec)
+    Parent.start_child(child_spec)
     ...
   end
   ```
@@ -74,7 +74,7 @@ defmodule Parent.GenServer do
   the result as `{:ok, pid}`. For example:
 
   ```
-  Parent.GenServer.start_child(%{
+  Parent.start_child(%{
     id: :hello_world,
     start: {Task, :start_link, [fn -> IO.puts "Hello, World!" end]}
   })
@@ -83,7 +83,7 @@ defmodule Parent.GenServer do
   You can also pass a zero-arity lambda for `:start`:
 
   ```
-  Parent.GenServer.start_child(%{
+  Parent.start_child(%{
     id: :hello_world,
     start: fn -> Task.start_link(fn -> IO.puts "Hello, World!" end) end
   })
@@ -117,9 +117,10 @@ defmodule Parent.GenServer do
 
   ## Working with child processes
 
-  This module provide various functions for managing child processes. For example,
-  you can enumerate running children with `children/0`, fetch child meta with
-  `child_meta/1`, or terminate a child process with `shutdown_child/1`.
+  The `Parent` module provides various functions for managing child processes.
+  For example, you can enumerate running children with `Parent.children/0`,
+  fetch child meta with `Parent.child_meta/1`, or terminate a child process with
+  `Parent.shutdown_child/1`.
 
   ## Termination
 
@@ -139,12 +140,17 @@ defmodule Parent.GenServer do
   the hot code reload process.
   """
   use GenServer
-  use Parent.PublicTypes
 
   @type state :: term
 
   @doc "Invoked when a child has terminated."
-  @callback handle_child_terminated(id, child_meta, pid, reason :: term, state) ::
+  @callback handle_child_terminated(
+              Parent.child_id(),
+              Parent.child_meta(),
+              pid,
+              reason :: term,
+              state
+            ) ::
               {:noreply, new_state}
               | {:noreply, new_state, timeout | :hibernate}
               | {:stop, reason :: term, new_state}
@@ -156,70 +162,38 @@ defmodule Parent.GenServer do
     GenServer.start_link(__MODULE__, {module, arg}, options)
   end
 
-  @doc "Starts the child described by the specification."
-  @spec start_child(child_spec | module | {module, term}) :: on_start_child
-  defdelegate start_child(child_spec), to: Parent.Procdict
+  @deprecated "Use Parent.start_child/1 instead"
+  defdelegate start_child(child_spec), to: Parent
 
-  @doc """
-  Terminates the child.
+  @deprecated "Use Parent.shutdown_child/1 instead"
+  defdelegate shutdown_child(child_id), to: Parent
 
-  This function waits for the child to terminate. In the case of explicit
-  termination, `handle_child_terminated/5` will not be invoked.
-  """
-  @spec shutdown_child(id) :: :ok
-  defdelegate shutdown_child(child_id), to: Parent.Procdict
+  @deprecated "Use Parent.shutdown_all/1 instead"
+  defdelegate shutdown_all(reason \\ :shutdown), to: Parent
 
-  @doc """
-  Terminates all running child processes.
+  @deprecated "Use Parent.children/0 instead"
+  defdelegate children(), to: Parent
 
-  Children are terminated synchronously, in the reverse order from the order they
-  have been started in.
-  """
-  @spec shutdown_all(reason :: term) :: :ok
-  defdelegate shutdown_all(reason \\ :shutdown), to: Parent.Procdict
+  @deprecated "Use Parent.num_children/0 instead"
+  defdelegate num_children(), to: Parent
 
-  @doc "Returns the list of running child processes."
-  @spec children :: [child]
-  defdelegate children(), to: Parent.Procdict, as: :entries
+  @deprecated "Use Parent.child_id/1 instead"
+  defdelegate child_id(pid), to: Parent
 
-  @doc "Returns the count of running child processes."
-  @spec num_children() :: non_neg_integer
-  defdelegate num_children(), to: Parent.Procdict, as: :size
+  @deprecated "Use Parent.child_pid/1 instead"
+  defdelegate child_pid(id), to: Parent
 
-  @doc "Returns the id of a child process with the given pid."
-  @spec child_id(pid) :: {:ok, id} | :error
-  defdelegate child_id(pid), to: Parent.Procdict, as: :id
+  @deprecated "Use Parent.child_meta/1 instead"
+  defdelegate child_meta(id), to: Parent
 
-  @doc "Returns the pid of a child process with the given id."
-  @spec child_pid(id) :: {:ok, pid} | :error
-  defdelegate child_pid(id), to: Parent.Procdict, as: :pid
+  @deprecated "Use Parent.update_child_meta/2 instead"
+  defdelegate update_child_meta(id, updater), to: Parent
 
-  @doc "Returns the meta associated with the given child id."
-  @spec child_meta(id) :: {:ok, child_meta} | :error
-  defdelegate child_meta(id), to: Parent.Procdict, as: :meta
+  @deprecated "Use Parent.await_child_termination/2 instead"
+  defdelegate await_child_termination(id, timeout), to: Parent
 
-  @doc "Updates the meta of the given child process."
-  @spec update_child_meta(id, (child_meta -> child_meta)) :: :ok | :error
-  defdelegate update_child_meta(id, updater), to: Parent.Procdict, as: :update_meta
-
-  @doc """
-  Awaits for the child to terminate.
-
-  If the function succeeds, `handle_child_terminated/5` will not be invoked.
-  """
-  @spec await_child_termination(id, non_neg_integer() | :infinity) ::
-          {pid, child_meta, reason :: term} | :timeout
-  defdelegate await_child_termination(id, timeout), to: Parent.Procdict, as: :await_termination
-
-  @doc """
-  Returns true if the child process is still running, false otherwise.
-
-  Note that this function might return true even if the child has terminated.
-  This can happen if the corresponding `:EXIT` message still hasn't been
-  processed.
-  """
-  @spec child?(id) :: boolean
-  def child?(id), do: match?({:ok, _}, child_pid(id))
+  @deprecated "Use Parent.child?/1 instead"
+  defdelegate child?(id), to: Parent
 
   @impl GenServer
   def init({callback, arg}) do
@@ -227,30 +201,30 @@ defmodule Parent.GenServer do
     Process.put(:"$initial_call", {:supervisor, callback, 1})
 
     Process.put({__MODULE__, :callback}, callback)
-    Parent.Procdict.initialize()
+    Parent.initialize()
     invoke_callback(:init, [arg])
   end
 
   @impl GenServer
   def handle_info(message, state) do
-    case Parent.Procdict.handle_message(message) do
-      :ignore ->
-        {:noreply, state}
-
+    case Parent.handle_message(message) do
       {:EXIT, pid, id, meta, reason} ->
         invoke_callback(:handle_child_terminated, [id, meta, pid, reason, state])
 
-      :error ->
+      :ignore ->
+        {:noreply, state}
+
+      nil ->
         invoke_callback(:handle_info, [message, state])
     end
   end
 
   @impl GenServer
   def handle_call(:which_children, _from, state),
-    do: {:reply, Parent.Procdict.supervisor_which_children(), state}
+    do: {:reply, Parent.supervisor_which_children(), state}
 
   def handle_call(:count_children, _from, state),
-    do: {:reply, Parent.Procdict.supervisor_count_children(), state}
+    do: {:reply, Parent.supervisor_count_children(), state}
 
   def handle_call(message, from, state), do: invoke_callback(:handle_call, [message, from, state])
 
@@ -277,7 +251,7 @@ defmodule Parent.GenServer do
   def terminate(reason, state) do
     invoke_callback(:terminate, [reason, state])
   after
-    Parent.Procdict.shutdown_all(reason)
+    Parent.shutdown_all(reason)
   end
 
   unless Version.compare(System.version(), "1.7.0") == :lt do

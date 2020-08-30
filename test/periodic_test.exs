@@ -47,7 +47,7 @@ defmodule PeriodicTest do
 
       finish_job(job)
       tick(scheduler)
-      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: job})
+      assert_periodic_event(:test_job, :started, %{scheduler: ^scheduler, job: _job})
     end
 
     test "stop_previous" do
