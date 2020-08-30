@@ -12,10 +12,7 @@ defmodule Parent.TestServer do
   def terminated_jobs(), do: Process.get(:terminated_jobs)
 
   @impl GenServer
-  def init(initializer) do
-    Process.put(:terminated_jobs, [])
-    {:ok, initializer.()}
-  end
+  def init(initializer), do: {:ok, initializer.()}
 
   @impl GenServer
   def handle_call(fun, _from, state) do
@@ -28,11 +25,4 @@ defmodule Parent.TestServer do
 
   @impl GenServer
   def handle_info(fun, state), do: {:noreply, fun.(state)}
-
-  @impl Parent.GenServer
-  def handle_child_terminated(id, meta, pid, reason, state) do
-    termination_info = %{id: id, meta: meta, pid: pid, reason: reason}
-    Process.put(:terminated_jobs, [termination_info | Process.get(:terminated_jobs)])
-    {:noreply, state}
-  end
 end

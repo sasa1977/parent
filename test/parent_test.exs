@@ -132,6 +132,154 @@ defmodule ParentTest do
     end
   end
 
+  describe "restart_child" do
+    test "restarts the process and returns the new pid" do
+      Parent.initialize()
+      {:ok, child} = start_child(id: :child)
+      assert {:ok, child2} = Parent.restart_child(:child)
+      refute child2 == child
+      assert Parent.child_pid(:child) == {:ok, child2}
+    end
+
+    test "fails if the process fails to start" do
+      Parent.initialize()
+
+      key = make_ref()
+      :persistent_term.put(key, false)
+      fun = fn -> if :persistent_term.get(key), do: raise("error") end
+      start = {Agent, :start_link, [fun]}
+
+      {:ok, _} = start_child(id: :child, start: start)
+
+      :persistent_term.put(key, true)
+
+      assert {:error, {%RuntimeError{message: "error"}, _stacktrace}} =
+               Parent.restart_child(:child)
+    end
+
+    test "preserves startup order" do
+      Parent.initialize()
+      {:ok, child1} = start_child(id: :child1)
+      {:ok, _child2} = start_child(id: :child2)
+      {:ok, child3} = start_child(id: :child3)
+
+      assert {:ok, child2} = Parent.restart_child(:child2)
+
+      assert Enum.map(Parent.children(), fn {_id, pid, _meta} -> pid end) ==
+               [child1, child2, child3]
+    end
+
+    test "fails if the parent is not initialized" do
+      assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.restart_child(1) end
+    end
+  end
+
+  describe "automatic child restart" do
+    test "is performed when a permanent child terminates" do
+      Parent.initialize()
+      {:ok, child} = start_child(id: :child, restart: :permanent, meta: :meta)
+      Agent.stop(child)
+
+      assert_receive message
+      assert {:child_restarted, restart_info} = Parent.handle_message(message)
+      assert restart_info.id == :child
+      assert restart_info.old_pid == child
+      assert restart_info.reason == :normal
+      assert restart_info.meta == :meta
+    end
+
+    test "is performed when a transient child terminates abnormally" do
+      Parent.initialize()
+      {:ok, child} = start_child(id: :child, restart: :transient, meta: :meta)
+      Process.exit(child, :kill)
+
+      assert_receive message
+      assert {:child_restarted, restart_info} = Parent.handle_message(message)
+      assert restart_info.id == :child
+      assert restart_info.old_pid == child
+      assert restart_info.meta == :meta
+    end
+
+    test "is performed when a child is terminated due to a timeout" do
+      Parent.initialize()
+      {:ok, child} = start_child(id: :child, restart: :permanent, meta: :meta, timeout: 0)
+
+      assert_receive message
+      assert {:child_restarted, restart_info} = Parent.handle_message(message)
+      assert restart_info.id == :child
+      assert restart_info.old_pid == child
+      assert restart_info.reason == :timeout
+      assert restart_info.meta == :meta
+    end
+
+    test "is not performed when a temporary child terminates" do
+      Parent.initialize()
+      {:ok, child} = start_child(id: :child, restart: :temporary)
+      Process.exit(child, :kill)
+
+      assert_receive message
+      refute match?({:child_restarted, _restart_info}, Parent.handle_message(message))
+      refute Parent.child?(:child)
+    end
+
+    test "is not performed when :restart option is not provided" do
+      Parent.initialize()
+      {:ok, child} = start_child(id: :child)
+      Process.exit(child, :kill)
+
+      assert_receive message
+      refute match?({:child_restarted, _restart_info}, Parent.handle_message(message))
+      refute Parent.child?(:child)
+    end
+
+    test "is not performed when a child is terminated via `Parent` function" do
+      Parent.initialize()
+      {:ok, _child} = start_child(id: :child, restart: :permanent)
+      Parent.shutdown_child(:child)
+
+      refute_receive _
+      refute Parent.child?(:child)
+    end
+
+    test "preserves startup order" do
+      Parent.initialize()
+      {:ok, child1} = start_child(id: :child1)
+      {:ok, child2} = start_child(id: :child2, restart: :permanent, meta: :meta)
+      {:ok, child3} = start_child(id: :child3)
+
+      Agent.stop(child2)
+      assert_receive message
+      {:child_restarted, %{new_pid: child2}} = Parent.handle_message(message)
+
+      assert Enum.map(Parent.children(), fn {_id, pid, _meta} -> pid end) ==
+               [child1, child2, child3]
+    end
+
+    test "takes down the entire parent if the new instance fails to start" do
+      Parent.initialize()
+
+      key = make_ref()
+      :persistent_term.put(key, false)
+      fun = fn -> if :persistent_term.get(key), do: raise("error") end
+      start = {Agent, :start_link, [fun]}
+
+      {:ok, child} = start_child(id: :child, restart: :permanent, start: start)
+
+      :persistent_term.put(key, true)
+      Process.exit(child, :kill)
+
+      assert_receive message
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert catch_exit(Parent.handle_message(message)) == :restart_error
+        end)
+
+      assert log =~ "[error] Failed to restart the child :child. Parent is terminating."
+      assert Parent.children() == []
+    end
+  end
+
   describe "shutdown_all/1" do
     test "terminates all children in the opposite startup order" do
       Parent.initialize()
@@ -349,7 +497,8 @@ defmodule ParentTest do
       GenServer.stop(child)
       assert_receive {:EXIT, ^child, _reason} = message
 
-      assert Parent.handle_message(message) == {:EXIT, child, :child, :meta, :normal}
+      assert Parent.handle_message(message) ==
+               {:child_terminated, %{id: :child, meta: :meta, pid: child, reason: :normal}}
 
       assert Parent.num_children() == 0
       assert Parent.children() == []
@@ -363,7 +512,8 @@ defmodule ParentTest do
 
       assert_receive {Parent, :child_timeout, ^child} = message
 
-      assert Parent.handle_message(message) == {:EXIT, child, :child, :meta, :timeout}
+      assert Parent.handle_message(message) ==
+               {:child_terminated, %{id: :child, meta: :meta, pid: child, reason: :timeout}}
 
       assert Parent.num_children() == 0
       assert Parent.children() == []

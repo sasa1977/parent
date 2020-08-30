@@ -73,6 +73,58 @@ defmodule Parent.GenServerTest do
     assert [pid1, pid2] == [child, parent]
   end
 
+  test "invokes handle_child_terminated/2" do
+    {:ok, parent} = TestServer.start_link(fn -> :initial_state end)
+
+    child_id = make_ref()
+
+    child_pid =
+      start_child(parent, %{
+        id: child_id,
+        start: {Agent, :start_link, [fn -> :ok end]},
+        meta: :meta,
+        type: :worker
+      }).pid
+
+    :erlang.trace(parent, true, [:call])
+    :erlang.trace_pattern({TestServer, :handle_child_terminated, 2}, [])
+
+    Process.exit(child_pid, :kill)
+
+    assert_receive {:trace, ^parent, :call,
+                    {Parent.TestServer, :handle_child_terminated, [info, :initial_state]}}
+
+    assert info == %{id: child_id, pid: child_pid, meta: :meta, reason: :killed}
+  end
+
+  test "invokes handle_child_restarted/2" do
+    {:ok, parent} = TestServer.start_link(fn -> :initial_state end)
+
+    child_id = make_ref()
+
+    child_pid =
+      start_child(parent, %{
+        id: child_id,
+        start: {Agent, :start_link, [fn -> :ok end]},
+        meta: :meta,
+        type: :worker,
+        restart: :permanent
+      }).pid
+
+    :erlang.trace(parent, true, [:call])
+    :erlang.trace_pattern({TestServer, :handle_child_restarted, 2}, [])
+
+    Process.exit(child_pid, :kill)
+
+    assert_receive {:trace, ^parent, :call,
+                    {Parent.TestServer, :handle_child_restarted, [info, :initial_state]}}
+
+    assert info.id == child_id
+    assert info.old_pid == child_pid
+    assert info.meta == :meta
+    assert info.reason == :killed
+  end
+
   describe "supervisor" do
     test "which children" do
       {:ok, pid} = TestServer.start_link(fn -> :initial_state end)

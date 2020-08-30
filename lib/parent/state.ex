@@ -17,13 +17,13 @@ defmodule Parent.State do
   @spec initialize() :: t
   def initialize(), do: %{id_to_pid: %{}, children: %{}, startup_index: 0}
 
-  @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
-  def register_child(state, pid, full_child_spec, timer_ref) do
+  @spec register_child(t, pid, Parent.child_spec(), reference | nil, non_neg_integer() | nil) :: t
+  def register_child(state, pid, full_child_spec, timer_ref, startup_index \\ nil) do
     child = %{
       spec: full_child_spec,
       pid: pid,
       timer_ref: timer_ref,
-      startup_index: state.startup_index
+      startup_index: startup_index || state.startup_index
     }
 
     false = Map.has_key?(state.children, pid)
@@ -32,11 +32,15 @@ defmodule Parent.State do
     state
     |> put_in([:id_to_pid, full_child_spec.id], pid)
     |> put_in([:children, pid], child)
-    |> update_in([:startup_index], &(&1 + 1))
+    |> update_in([:startup_index], &if(is_nil(startup_index), do: &1 + 1, else: &1))
   end
 
   @spec children(t) :: [child()]
-  def children(state), do: Map.values(state.children)
+  def children(state) do
+    state.children
+    |> Map.values()
+    |> Enum.sort_by(& &1.startup_index)
+  end
 
   @spec pop(t, pid) :: {:ok, child, t} | :error
   def pop(state, pid) do

@@ -1,3 +1,8 @@
+# 0.11.0
+- **[Breaking]** - `handle_child_terminated/5` callback of `Parent.GenServer` is replaced with `handle_child_terminated/2`
+- **[Breaking]** - Return type of `Parent.handle_message/1` has changed. Refer to documentation for details.
+- Added support for automatic restarts of children via the `:restart` option.
+
 # 0.10.0
 
 - **[Deprecation]** - all `Parent.GenServer` functions except for `start_link` have been deprecated. Use equivalent functions from the `Parent` module instead.

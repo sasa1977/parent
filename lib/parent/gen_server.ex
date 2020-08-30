@@ -95,25 +95,28 @@ defmodule Parent.GenServer do
 
   ## Handling child termination
 
-  When a child process terminates, `handle_child_terminated/5` will be invoked.
+  When a child process terminates, `handle_child_terminated/2` will be invoked.
   The default implementation is injected into the module, but you can of course
   override it:
 
   ```
   @impl Parent.GenServer
-  def handle_child_terminated(id, child_meta, pid, reason, state) do
+  def handle_child_terminated(_info, state) do
     ...
     {:noreply, state}
   end
   ```
 
-  The return value of `handle_child_terminated` is the same as for `handle_info`.
+  This callback is not invoked in the following cases:
+
+      - The child is explicitly stopped via `Parent` using functions such as `Parent.shutdown_child/1`.
+      - The child is restarted.
 
   ## Timeout
 
   If a positive integer is provided via the `:timeout` option, the parent will
   terminate the child if it doesn't stop within the given time. In this case,
-  `handle_child_terminated/5` will be invoked with the exit reason `:timeout`.
+  `handle_child_terminated/2` will be invoked with the exit reason `:timeout`.
 
   ## Working with child processes
 
@@ -143,14 +146,28 @@ defmodule Parent.GenServer do
 
   @type state :: term
 
-  @doc "Invoked when a child has terminated."
-  @callback handle_child_terminated(
-              Parent.child_id(),
-              Parent.child_meta(),
-              pid,
-              reason :: term,
-              state
-            ) ::
+  @doc """
+  Invoked when a child has terminated.
+
+  This callback will not be invoked if a child is restarted, or if it is terminated
+  via Parent functions such as `Parent.shutdown_child/1` or `Parent.shutdown_all/0`.
+  """
+  @callback handle_child_terminated(info :: Parent.child_termination_info(), state) ::
+              {:noreply, new_state}
+              | {:noreply, new_state, timeout | :hibernate}
+              | {:stop, reason :: term, new_state}
+            when new_state: state
+
+  @doc """
+  Invoked when a child is restarted.
+
+  Note that if a child is terminated via Parent functions such as `Parent.shutdown_child/1`
+  or `Parent.shutdown_all/0`, the child will not be restarted, and this callback will not be
+  invoked.
+
+  This callback is also not invoked if a child is restarted via `Parent.restart_child/1`.
+  """
+  @callback handle_child_restarted(info :: Parent.child_restart_info(), state) ::
               {:noreply, new_state}
               | {:noreply, new_state, timeout | :hibernate}
               | {:stop, reason :: term, new_state}
@@ -158,9 +175,8 @@ defmodule Parent.GenServer do
 
   @doc "Starts the parent process."
   @spec start_link(module, arg :: term, GenServer.options()) :: GenServer.on_start()
-  def start_link(module, arg, options \\ []) do
-    GenServer.start_link(__MODULE__, {module, arg}, options)
-  end
+  def start_link(module, arg, options \\ []),
+    do: GenServer.start_link(__MODULE__, {module, arg}, options)
 
   @deprecated "Use Parent.start_child/1 instead"
   defdelegate start_child(child_spec), to: Parent
@@ -208,8 +224,11 @@ defmodule Parent.GenServer do
   @impl GenServer
   def handle_info(message, state) do
     case Parent.handle_message(message) do
-      {:EXIT, pid, id, meta, reason} ->
-        invoke_callback(:handle_child_terminated, [id, meta, pid, reason, state])
+      {:child_terminated, info} ->
+        invoke_callback(:handle_child_terminated, [info, state])
+
+      {:child_restarted, info} ->
+        invoke_callback(:handle_child_restarted, [info, state])
 
       :ignore ->
         {:noreply, state}
@@ -288,9 +307,12 @@ defmodule Parent.GenServer do
       end
 
       @impl behaviour
-      def handle_child_terminated(_id, _meta, _pid, _reason, state), do: {:noreply, state}
+      def handle_child_terminated(_info, state), do: {:noreply, state}
 
-      defoverridable handle_child_terminated: 5, child_spec: 1
+      @impl behaviour
+      def handle_child_restarted(_info, state), do: {:noreply, state}
+
+      defoverridable handle_child_terminated: 2, handle_child_restarted: 2, child_spec: 1
     end
   end
 end

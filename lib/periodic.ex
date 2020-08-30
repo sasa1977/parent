@@ -358,18 +358,20 @@ defmodule Periodic do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(_id, meta, pid, reason, state) do
-    with from when not is_nil(from) <- meta.caller, do: GenServer.reply(from, {:ok, reason})
+  def handle_child_terminated(info, state) do
+    with from when not is_nil(from) <- info.meta.caller,
+         do: GenServer.reply(from, {:ok, info.reason})
+
     if state.delay_mode == :shifted, do: enqueue_next_tick(state, state.every)
 
     duration =
       :erlang.convert_time_unit(
-        :erlang.monotonic_time() - meta.started_at,
+        :erlang.monotonic_time() - info.meta.started_at,
         :native,
         :microsecond
       )
 
-    telemetry(state, :finished, %{job: pid, reason: reason}, %{time: duration})
+    telemetry(state, :finished, %{job: info.pid, reason: info.reason}, %{time: duration})
     {:noreply, state}
   end
 

@@ -67,7 +67,7 @@ You might wonder what's the benefit of `start_child/1` vs plain `Task.start_link
 
 Another benefit is that you can use other `Parent` functions to work with child processes started with `start_child/1`. You can enumerate the child processes, fetch individual children by their id, and know the count of alive child processes. This is where `Parent` serves as a kind of a unique registry.
 
-Finally, if a child terminates, the behaviour will handle the corresponding `:EXIT` message, and convert it into the callback `handle_child_terminated(child_name :: term, meta :: term, pid, reason :: term, state)`. This is the only callback specific to `Parent.GenServer`.
+Finally, if a child terminates, the behaviour will handle the corresponding `:EXIT` message, and convert it into the callback `handle_child_terminated(termination_info :: Parent.child_termination_info(), state)`. This is the only callback specific to `Parent.GenServer`.
 
 This pretty much covers the `Parent.GenServer` behaviour. In my opinion, it's a relatively small variation of GenServer, which makes it fairly easy to reason about (assuming the user is already familiar with GenServer). However, before looking at use cases, let's discuss one controversial implementation detail.
 
@@ -206,7 +206,7 @@ defmodule Demo.Cancellable do
   def handle_info(unknown_message, state), do: super(unknown_message, state)
 
   @impl Parent.GenServer
-  def handle_child_terminated(:job, _meta, _pid, reason, state) do
+  def handle_child_terminated(%{id: :job, reason: reason}, state) do
     if reason == :normal do
       IO.puts("job succeeded")
     else
@@ -261,7 +261,7 @@ defmodule Demo.Queue do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(_id, _meta, _pid, reason, state) do
+  def handle_child_terminated(%{reason: reason}, state) do
     if reason == :normal do
       IO.puts("job succeeded")
     else

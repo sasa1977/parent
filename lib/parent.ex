@@ -31,6 +31,8 @@ defmodule Parent do
 
   You can take a look at the code of `Parent.GenServer` for specific details.
   """
+  require Logger
+
   alias Parent.State
 
   @type child_spec :: %{
@@ -40,7 +42,8 @@ defmodule Parent do
           optional(:type) => :worker | :supervisor,
           optional(:meta) => child_meta,
           optional(:shutdown) => shutdown,
-          optional(:timeout) => pos_integer | :infinity
+          optional(:timeout) => pos_integer | :infinity,
+          optional(:restart) => :permanent | :temporary | :transient
         }
 
   @type child_id :: term
@@ -52,7 +55,20 @@ defmodule Parent do
 
   @type child :: {child_id, pid, child_meta}
 
-  @type handle_message_response :: {:EXIT, pid, child_id, child_meta, reason :: term} | :ignore
+  @type handle_message_response ::
+          {:child_terminated, child_termination_info}
+          | {:child_restarted, child_restart_info}
+          | :ignore
+
+  @type child_termination_info :: %{id: child_id, pid: pid, meta: child_meta, reason: term}
+
+  @type child_restart_info :: %{
+          id: child_id,
+          old_pid: pid,
+          new_pid: pid,
+          meta: child_meta,
+          reason: term
+        }
 
   @doc """
   Initializes the state of the parent process.
@@ -76,30 +92,37 @@ defmodule Parent do
   @spec start_child(child_spec | module | {module, term}) :: Supervisor.on_start_child()
   def start_child(child_spec) do
     state = state()
-
     full_child_spec = expand_child_spec(child_spec)
 
     with :ok <- validate_id(state, full_child_spec.id),
-         {:ok, pid} <- start_child_process(full_child_spec.start) do
-      timer_ref =
-        case full_child_spec.timeout do
-          :infinity -> nil
-          timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
-        end
-
-      state
-      |> State.register_child(pid, full_child_spec, timer_ref)
-      |> store()
-
+         {:ok, pid, state} <- do_start_child(state, full_child_spec) do
+      store(state)
       {:ok, pid}
+    end
+  end
+
+  @doc "Restarts the child."
+  @spec restart_child(child_id) :: Supervisor.on_start_child()
+  def restart_child(child_id) do
+    case State.child_pid(state(), child_id) do
+      :error ->
+        raise "trying to terminate an unknown child"
+
+      {:ok, pid} ->
+        {:ok, child, _state} = State.pop(state(), pid)
+        shutdown_child(child_id)
+
+        with {:ok, pid, state} <- do_start_child(state(), child.spec, child.startup_index) do
+          store(state)
+          {:ok, pid}
+        end
     end
   end
 
   @doc """
   Terminates the child.
 
-  This function waits for the child to terminate. In the case of explicit
-  termination, `handle_child_terminated/5` will not be invoked.
+  This function waits for the child to terminate, and pulls the `:EXIT` message from the mailbox.
   """
   @spec shutdown_child(child_id) :: :ok
   def shutdown_child(child_id) do
@@ -120,7 +143,7 @@ defmodule Parent do
   Terminates all running child processes.
 
   Children are terminated synchronously, in the reverse order from the order they
-  have been started in.
+  have been started in. All corresponding `:EXIT` messages will be pulled from the mailbox.
   """
   @spec shutdown_all(term) :: :ok
   def shutdown_all(reason \\ :shutdown) do
@@ -128,7 +151,7 @@ defmodule Parent do
 
     state()
     |> State.children()
-    |> Enum.sort_by(& &1.startup_index, &>=/2)
+    |> Enum.reverse()
     |> Enum.each(&do_shutdown_child(&1, reason))
 
     store(State.initialize())
@@ -145,8 +168,10 @@ defmodule Parent do
   However, in some cases, a client might want to do some special processing, so the return value
   will contain information which might be of interest to the client. Possible values are:
 
-    - `{:EXIT, pid, id, child_meta, reason :: term}` - a child process has terminated
-    - `:ignore` - `Parent` handled this message, but there's no useful information to return
+    - `{:child_terminated, info}` - a child process has terminated
+    - `{:child_restarted, info}` - `Parent` handled this message, but there's no useful information to return
+
+  See `t:handle_message_response/0` for detailed type specification of each message.
 
   Note that you don't need to invoke this function in a `Parent.GenServer` callback module.
   """
@@ -161,7 +186,7 @@ defmodule Parent do
   @doc """
   Awaits for the child to terminate.
 
-  If the function succeeds, `handle_child_terminated/5` will not be invoked.
+  If the function succeeds, `handle_child_terminated/2` will not be invoked.
   """
   @spec await_child_termination(child_id, non_neg_integer() | :infinity) ::
           {pid, child_meta, reason :: term} | :timeout
@@ -185,7 +210,7 @@ defmodule Parent do
     end
   end
 
-  @doc "Returns the list of running child processes."
+  @doc "Returns the list of running child processes in the startup order."
   @spec children :: [child]
   def children(),
     do: Enum.map(State.children(state()), &{&1.spec.id, &1.pid, &1.spec.meta})
@@ -269,7 +294,7 @@ defmodule Parent do
          do: store(new_state)
   end
 
-  @default_spec %{meta: nil, timeout: :infinity}
+  @default_spec %{meta: nil, timeout: :infinity, restart: :temporary}
 
   defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, nil})
   defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
@@ -298,6 +323,20 @@ defmodule Parent do
     end
   end
 
+  defp do_start_child(state, full_child_spec, startup_index \\ nil) do
+    with {:ok, pid} <- start_child_process(full_child_spec.start) do
+      timer_ref =
+        case full_child_spec.timeout do
+          :infinity -> nil
+          timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
+        end
+
+      state = State.register_child(state, pid, full_child_spec, timer_ref, startup_index)
+
+      {:ok, pid, state}
+    end
+  end
+
   defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
   defp start_child_process(fun) when is_function(fun, 0), do: fun.()
 
@@ -305,7 +344,7 @@ defmodule Parent do
     case State.pop(state, pid) do
       {:ok, child, state} ->
         kill_timer(child.timer_ref, pid)
-        {{:EXIT, pid, child.spec.id, child.spec.meta, reason}, state}
+        handle_child_down(state, child, reason)
 
       :error ->
         nil
@@ -315,7 +354,7 @@ defmodule Parent do
   defp do_handle_message(state, {__MODULE__, :child_timeout, pid}) do
     {:ok, child, state} = State.pop(state, pid)
     do_shutdown_child(child, :kill)
-    {{:EXIT, pid, child.spec.id, child.spec.meta, :timeout}, state}
+    handle_child_down(state, child, :timeout)
   end
 
   defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
@@ -329,6 +368,37 @@ defmodule Parent do
   end
 
   defp do_handle_message(_state, _other), do: nil
+
+  defp handle_child_down(state, child, reason) do
+    if child.spec.restart == :temporary or
+         (child.spec.restart == :transient and reason == :normal) do
+      {{:EXIT, child.pid, child.spec.id, child.spec.meta, reason}, state}
+      info = %{id: child.spec.id, pid: child.pid, meta: child.spec.meta, reason: reason}
+      {{:child_terminated, info}, state}
+    else
+      case do_start_child(state, child.spec, child.startup_index) do
+        {:ok, new_pid, state} ->
+          info = %{
+            id: child.spec.id,
+            old_pid: child.pid,
+            new_pid: new_pid,
+            meta: child.spec.meta,
+            reason: reason
+          }
+
+          {{:child_restarted, info}, state}
+
+        _error ->
+          Logger.error(
+            "Failed to restart the child #{inspect(child.spec.id)}. Parent is terminating."
+          )
+
+          store(state)
+          shutdown_all()
+          exit(:restart_error)
+      end
+    end
+  end
 
   defp do_shutdown_child(child, reason) do
     kill_timer(child.timer_ref, child.pid)

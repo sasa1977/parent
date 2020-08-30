@@ -14,7 +14,7 @@ defmodule BufferBatching.Consumer do
     do: {:reply, :ok, buffer |> Buffer.add(item) |> maybe_process()}
 
   @impl Parent.GenServer
-  def handle_child_terminated(_id, _meta, _pid, _reason, buffer),
+  def handle_child_terminated(_info, buffer),
     do: {:noreply, maybe_process(buffer)}
 
   defp maybe_process(buffer) do

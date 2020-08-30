@@ -32,7 +32,7 @@ defmodule MyParent do
   def handle_info(other, state), do: super(other, state)
 
   @impl Parent.GenServer
-  def handle_child_terminated(:job, job_number, _pid, _reason, state) do
+  def handle_child_terminated(%{id: :job, meta: job_number}, state) do
     Logger.info("job #{job_number} finished")
     Process.send_after(self(), {:start_job, job_number + 1}, :timer.seconds(1))
     {:noreply, state}
