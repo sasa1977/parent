@@ -149,8 +149,11 @@ defmodule Parent.GenServer do
   @doc """
   Invoked when a child has terminated.
 
-  This callback will not be invoked if a child is restarted, or if it is terminated
-  via Parent functions such as `Parent.shutdown_child/1` or `Parent.shutdown_all/0`.
+  This callback will not be invoked in the following cases:
+
+    - a child is terminated by invoking `Parent` functions such as `Parent.shutdown_child/1`
+    - a child is implicitly terminated by `Parent` because its dependency has stopped
+    - a child is restarted
   """
   @callback handle_child_terminated(info :: Parent.child_termination_info(), state) ::
               {:noreply, new_state}
@@ -161,11 +164,10 @@ defmodule Parent.GenServer do
   @doc """
   Invoked when a child is restarted.
 
-  Note that if a child is terminated via Parent functions such as `Parent.shutdown_child/1`
-  or `Parent.shutdown_all/0`, the child will not be restarted, and this callback will not be
-  invoked.
+  This callback will not be invoked in the following cases:
 
-  This callback is also not invoked if a child is restarted via `Parent.restart_child/1`.
+    - a child is restarted via `Parent.restart_child/1`
+    - a child is implicitly restarted by `Parent` because its dependency was restarted
   """
   @callback handle_child_restarted(info :: Parent.child_restart_info(), state) ::
               {:noreply, new_state}

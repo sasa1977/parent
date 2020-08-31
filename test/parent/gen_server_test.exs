@@ -94,7 +94,13 @@ defmodule Parent.GenServerTest do
     assert_receive {:trace, ^parent, :call,
                     {Parent.TestServer, :handle_child_terminated, [info, :initial_state]}}
 
-    assert info == %{id: child_id, pid: child_pid, meta: :meta, reason: :killed}
+    assert info == %{
+             id: child_id,
+             pid: child_pid,
+             meta: :meta,
+             reason: :killed,
+             also_terminated: []
+           }
   end
 
   test "invokes handle_child_restarted/2" do
@@ -120,8 +126,6 @@ defmodule Parent.GenServerTest do
                     {Parent.TestServer, :handle_child_restarted, [info, :initial_state]}}
 
     assert info.id == child_id
-    assert info.old_pid == child_pid
-    assert info.meta == :meta
     assert info.reason == :killed
   end
 
