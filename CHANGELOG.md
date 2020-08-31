@@ -1,6 +1,8 @@
 # 0.11.0
-- **[Breaking]** - `handle_child_terminated/5` callback of `Parent.GenServer` is replaced with `handle_child_terminated/2`
-- **[Breaking]** - Return type of `Parent.handle_message/1` has changed. Refer to documentation for details.
+- **[Breaking]**
+  - `handle_child_terminated/5` callback of `Parent.GenServer` is replaced with `handle_child_terminated/2`.
+  - Return type of `Parent.children/0` has changed. Refer to documentation for details.
+  - Return type of `Parent.handle_message/1` has changed. Refer to documentation for details.
 - Added support for automatic restarts of children via the `:restart` option.
 
 # 0.10.0

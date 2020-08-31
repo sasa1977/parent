@@ -440,7 +440,7 @@ defmodule Periodic do
 
   defp previous_instance() do
     case Parent.children() do
-      [{_id, pid, _meta}] -> {:ok, pid}
+      [child] -> {:ok, child.pid}
       [] -> :error
     end
   end

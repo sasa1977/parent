@@ -53,7 +53,7 @@ defmodule Parent do
 
   @type shutdown :: non_neg_integer() | :infinity | :brutal_kill
 
-  @type child :: {child_id, pid, child_meta}
+  @type child :: %{id: child_id, pid: pid, meta: child_meta}
 
   @type handle_message_response ::
           {:child_terminated, child_termination_info}
@@ -213,7 +213,7 @@ defmodule Parent do
   @doc "Returns the list of running child processes in the startup order."
   @spec children :: [child]
   def children(),
-    do: Enum.map(State.children(state()), &{&1.spec.id, &1.pid, &1.spec.meta})
+    do: Enum.map(State.children(state()), &%{id: &1.spec.id, pid: &1.pid, meta: &1.spec.meta})
 
   @doc """
   Returns true if the child process is still running, false otherwise.

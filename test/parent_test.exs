@@ -164,9 +164,7 @@ defmodule ParentTest do
       {:ok, child3} = start_child(id: :child3)
 
       assert {:ok, child2} = Parent.restart_child(:child2)
-
-      assert Enum.map(Parent.children(), fn {_id, pid, _meta} -> pid end) ==
-               [child1, child2, child3]
+      assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
 
     test "fails if the parent is not initialized" do
@@ -251,8 +249,7 @@ defmodule ParentTest do
       assert_receive message
       {:child_restarted, %{new_pid: child2}} = Parent.handle_message(message)
 
-      assert Enum.map(Parent.children(), fn {_id, pid, _meta} -> pid end) ==
-               [child1, child2, child3]
+      assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
 
     test "takes down the entire parent if the new instance fails to start" do
@@ -347,13 +344,17 @@ defmodule ParentTest do
       assert Parent.children() == []
 
       child1 = start_child!(id: :child1, meta: :meta1)
-      assert Parent.children() == [{:child1, child1, :meta1}]
+      assert Parent.children() == [%{id: :child1, pid: child1, meta: :meta1}]
 
       child2 = start_child!(id: :child2, meta: :meta2)
-      assert Parent.children() == [{:child1, child1, :meta1}, {:child2, child2, :meta2}]
+
+      assert Parent.children() == [
+               %{id: :child1, pid: child1, meta: :meta1},
+               %{id: :child2, pid: child2, meta: :meta2}
+             ]
 
       Parent.shutdown_child(:child1)
-      assert Parent.children() == [{:child2, child2, :meta2}]
+      assert Parent.children() == [%{id: :child2, pid: child2, meta: :meta2}]
     end
 
     test "fails if the parent is not initialized" do
