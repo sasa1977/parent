@@ -13,7 +13,8 @@ defmodule Parent.State do
           timer_ref: reference() | nil,
           startup_index: non_neg_integer(),
           dependencies: MapSet.t(Parent.child_id()),
-          bound_siblings: MapSet.t(Parent.child_id())
+          bound_siblings: MapSet.t(Parent.child_id()),
+          restart_counter: Parent.RestartCounter.t()
         }
 
   @type filter :: [{:id, Parent.child_id()}] | [{:pid, pid}]
@@ -21,15 +22,22 @@ defmodule Parent.State do
   @spec initialize() :: t
   def initialize(), do: %{id_to_pid: %{}, children: %{}, startup_index: 0}
 
-  @spec register_child(t, pid, Parent.child_spec(), reference | nil, non_neg_integer() | nil) :: t
-  def register_child(state, pid, full_child_spec, timer_ref, startup_index \\ nil) do
+  @spec register_child(
+          t,
+          pid,
+          Parent.child_spec(),
+          reference | nil,
+          non_neg_integer() | nil,
+          term
+        ) :: t
+  def register_child(state, pid, spec, timer_ref, startup_index, restart_counter) do
     false = Map.has_key?(state.children, pid)
-    false = Map.has_key?(state.id_to_pid, full_child_spec.id)
+    false = Map.has_key?(state.id_to_pid, spec.id)
 
     dependencies =
       Enum.reduce(
-        full_child_spec.binds_to,
-        MapSet.new(full_child_spec.binds_to),
+        spec.binds_to,
+        MapSet.new(spec.binds_to),
         &MapSet.union(&2, child!(state, id: &1).dependencies)
       )
 
@@ -39,22 +47,23 @@ defmodule Parent.State do
         state,
         fn dep_id, state ->
           update!(state, [id: dep_id], fn dep ->
-            update_in(dep.bound_siblings, &MapSet.put(&1, full_child_spec.id))
+            update_in(dep.bound_siblings, &MapSet.put(&1, spec.id))
           end)
         end
       )
 
     child = %{
-      spec: full_child_spec,
+      spec: spec,
       pid: pid,
       timer_ref: timer_ref,
       startup_index: startup_index || state.startup_index,
       dependencies: dependencies,
-      bound_siblings: MapSet.new()
+      bound_siblings: MapSet.new(),
+      restart_counter: restart_counter || Parent.RestartCounter.new(spec.restart)
     }
 
     state
-    |> put_in([:id_to_pid, full_child_spec.id], pid)
+    |> put_in([:id_to_pid, spec.id], pid)
     |> put_in([:children, pid], child)
     |> update_in([:startup_index], &if(is_nil(startup_index), do: &1 + 1, else: &1))
   end
@@ -64,6 +73,14 @@ defmodule Parent.State do
     state.children
     |> Map.values()
     |> Enum.sort_by(& &1.startup_index)
+  end
+
+  @spec record_restart(t, filter) :: {:ok, t} | :error
+  def record_restart(state, filter) do
+    case Parent.RestartCounter.record_restart(child!(state, filter).restart_counter) do
+      {:ok, counter} -> {:ok, update!(state, filter, &%{&1 | restart_counter: counter})}
+      :error -> :error
+    end
   end
 
   @spec pop(t, filter) :: {:ok, child, t} | :error

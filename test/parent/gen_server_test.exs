@@ -2,13 +2,21 @@ defmodule Parent.GenServerTest do
   use ExUnit.Case, async: true
   alias Parent.TestServer
 
+  setup do
+    Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn ->
+      :erlang.unique_integer([:monotonic, :positive]) * :timer.seconds(5)
+    end)
+
+    :ok
+  end
+
   test "init" do
-    {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+    pid = start_test_server!()
     assert :sys.get_state(pid) == :initial_state
   end
 
   test "call" do
-    {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+    pid = start_test_server!()
 
     assert TestServer.call(pid, fn state -> {{:response, state}, :new_state} end) ==
              {:response, :initial_state}
@@ -17,26 +25,26 @@ defmodule Parent.GenServerTest do
   end
 
   test "call which throws a reply" do
-    {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+    pid = start_test_server!()
 
     assert TestServer.call(pid, fn _state -> throw({:reply, :response, :new_state}) end)
     assert :sys.get_state(pid) == :new_state
   end
 
   test "cast" do
-    {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+    pid = start_test_server!()
     assert TestServer.cast(pid, fn state -> {:updated_state, state} end) == :ok
     assert :sys.get_state(pid) == {:updated_state, :initial_state}
   end
 
   test "send" do
-    {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+    pid = start_test_server!()
     TestServer.send(pid, fn state -> {:updated_state, state} end)
     assert :sys.get_state(pid) == {:updated_state, :initial_state}
   end
 
   test "starting a child" do
-    {:ok, parent} = TestServer.start_link(fn -> :initial_state end)
+    parent = start_test_server!()
 
     child_id = make_ref()
 
@@ -50,7 +58,7 @@ defmodule Parent.GenServerTest do
   end
 
   test "terminates children before the parent stops" do
-    {:ok, parent} = TestServer.start_link(fn -> :initial_state end)
+    parent = start_test_server!()
 
     child_id = make_ref()
 
@@ -74,7 +82,7 @@ defmodule Parent.GenServerTest do
   end
 
   test "invokes handle_child_terminated/2" do
-    {:ok, parent} = TestServer.start_link(fn -> :initial_state end)
+    parent = start_test_server!()
 
     child_id = make_ref()
 
@@ -104,7 +112,7 @@ defmodule Parent.GenServerTest do
   end
 
   test "invokes handle_child_restarted/2" do
-    {:ok, parent} = TestServer.start_link(fn -> :initial_state end)
+    parent = start_test_server!()
 
     child_id = make_ref()
 
@@ -131,7 +139,7 @@ defmodule Parent.GenServerTest do
 
   describe "supervisor" do
     test "which children" do
-      {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+      pid = start_test_server!()
 
       child_specs =
         Enum.map([{1, :worker}, {2, :supervisor}], fn {id, type} ->
@@ -147,7 +155,7 @@ defmodule Parent.GenServerTest do
     end
 
     test "count children" do
-      {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+      pid = start_test_server!()
 
       Enum.map([{1, :worker}, {2, :supervisor}], fn {id, type} ->
         start_child(pid, %{id: id, start: {Agent, :start_link, [fn -> :ok end]}, type: type})
@@ -157,18 +165,27 @@ defmodule Parent.GenServerTest do
     end
 
     test "get callback module" do
-      {:ok, pid} = TestServer.start_link(fn -> :initial_state end)
+      pid = start_test_server!()
       assert :supervisor.get_callback_module(pid) == TestServer
     end
+  end
+
+  defp start_test_server! do
+    pid = start_supervised!({TestServer, fn -> :initial_state end})
+    Mox.allow(Parent.RestartCounter.TimeProvider.Test, self(), pid)
+    pid
   end
 
   defp start_child(parent_pid, child_spec) do
     id = Map.get(child_spec, :id, make_ref())
     child_spec = Map.merge(%{id: id, meta: {id, :meta}}, child_spec)
 
-    TestServer.call(parent_pid, fn state ->
-      {:ok, child_pid} = Parent.start_child(child_spec)
-      {%{id: child_spec.id, pid: child_pid, meta: child_spec.meta}, state}
-    end)
+    result =
+      TestServer.call(parent_pid, fn state ->
+        {:ok, child_pid} = Parent.start_child(child_spec)
+        {%{id: child_spec.id, pid: child_pid, meta: child_spec.meta}, state}
+      end)
+
+    result
   end
 end

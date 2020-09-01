@@ -17,6 +17,14 @@ defmodule ParentTest do
     end
   end
 
+  setup do
+    Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn ->
+      :erlang.unique_integer([:monotonic, :positive]) * :timer.seconds(5)
+    end)
+
+    :ok
+  end
+
   describe "initialize/0" do
     test "traps exists" do
       Process.flag(:trap_exit, false)
@@ -269,7 +277,7 @@ defmodule ParentTest do
 
     test "is not performed when a temporary child terminates" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, restart: :temporary)
+      {:ok, child} = start_child(id: :child, restart: :never)
       Process.exit(child, :kill)
 
       assert_receive message
@@ -358,6 +366,54 @@ defmodule ParentTest do
 
       refute new_child1 == child1
       refute new_child2 == child2
+    end
+
+    test "takes down the entire parent on too many restarts" do
+      Parent.initialize()
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
+
+      {:ok, _} = start_child(id: :child1, restart: %{max: 2, in: 100})
+      {:ok, _} = start_child(id: :child2)
+
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+      Parent.handle_message(assert_receive message)
+
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+      Parent.handle_message(assert_receive message)
+
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+
+      assert ExUnit.CaptureLog.capture_log(fn ->
+               assert catch_exit(Parent.handle_message(assert_receive message)) ==
+                        :too_many_restarts
+             end) =~ "[error] Too many restarts of child :child1"
+
+      assert Parent.children() == []
+    end
+
+    test "clears recorded restarts after the interval has passed" do
+      Parent.initialize()
+
+      {:ok, _} = start_child(id: :child1, restart: :permanent, restart: %{max: 2, in: 100})
+      {:ok, _} = start_child(id: :child2)
+
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+      Parent.handle_message(assert_receive message)
+
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 100 end)
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+      Parent.handle_message(assert_receive message)
+
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 200 end)
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+      Parent.handle_message(assert_receive message)
     end
   end
 
