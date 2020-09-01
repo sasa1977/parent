@@ -81,7 +81,7 @@ defmodule Parent.GenServerTest do
     assert [pid1, pid2] == [child, parent]
   end
 
-  test "invokes handle_child_terminated/2" do
+  test "invokes handle_child_terminated/2 when a temporary worker stops" do
     parent = start_test_server!()
 
     child_id = make_ref()
@@ -91,7 +91,8 @@ defmodule Parent.GenServerTest do
         id: child_id,
         start: {Agent, :start_link, [fn -> :ok end]},
         meta: :meta,
-        type: :worker
+        type: :worker,
+        restart: :never
       }).pid
 
     :erlang.trace(parent, true, [:call])
@@ -111,7 +112,7 @@ defmodule Parent.GenServerTest do
            }
   end
 
-  test "invokes handle_child_restarted/2" do
+  test "invokes handle_child_restarted/2 when a permanent worker stops and restarts the child" do
     parent = start_test_server!()
 
     child_id = make_ref()
@@ -121,8 +122,7 @@ defmodule Parent.GenServerTest do
         id: child_id,
         start: {Agent, :start_link, [fn -> :ok end]},
         meta: :meta,
-        type: :worker,
-        restart: :permanent
+        type: :worker
       }).pid
 
     :erlang.trace(parent, true, [:call])
@@ -135,6 +135,10 @@ defmodule Parent.GenServerTest do
 
     assert info.id == child_id
     assert info.reason == :killed
+    assert [child] = TestServer.call(parent, &{Parent.children(), &1})
+    assert child.id == child_id
+    assert child.meta == :meta
+    refute child.pid == child_pid
   end
 
   describe "supervisor" do

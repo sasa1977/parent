@@ -428,6 +428,7 @@ defmodule Periodic do
         start: {Task, :start_link, [fn -> invoke_job(job) end]},
         timeout: state.timeout,
         shutdown: state.job_shutdown,
+        restart: :never,
         meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
       })
 

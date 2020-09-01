@@ -214,9 +214,9 @@ defmodule ParentTest do
     test "also restarts non-temporary dependees" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1, restart: :permanent)
-      {:ok, child2} = start_child(id: :child2, restart: :permanent, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, binds_to: [:child2])
+      {:ok, child1} = start_child(id: :child1)
+      {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
+      {:ok, child3} = start_child(id: :child3, restart: :never, binds_to: [:child2])
       {:ok, child4} = start_child(id: :child4)
 
       Process.monitor(child2)
@@ -243,7 +243,7 @@ defmodule ParentTest do
   describe "automatic child restart" do
     test "is performed when a permanent child terminates" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, restart: :permanent, meta: :meta)
+      {:ok, child} = start_child(id: :child, meta: :meta)
       Agent.stop(child)
 
       assert_receive message
@@ -255,7 +255,7 @@ defmodule ParentTest do
 
     test "is performed when a transient child terminates abnormally" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, restart: :transient, meta: :meta)
+      {:ok, child} = start_child(id: :child, restart: %{on: :crash}, meta: :meta)
       Process.exit(child, :kill)
 
       assert_receive message
@@ -266,12 +266,22 @@ defmodule ParentTest do
 
     test "is performed when a child is terminated due to a timeout" do
       Parent.initialize()
-      {:ok, _child} = start_child(id: :child, restart: :permanent, meta: :meta, timeout: 0)
+      {:ok, _child} = start_child(id: :child, meta: :meta, timeout: 0)
 
       assert_receive message
       assert {:child_restarted, restart_info} = Parent.handle_message(message)
       assert restart_info.id == :child
       assert restart_info.reason == :timeout
+      assert Parent.child?(:child)
+    end
+
+    test "is performed when :restart option is not provided" do
+      Parent.initialize()
+      {:ok, child} = start_child(id: :child)
+      Agent.stop(child)
+
+      assert_receive message
+      assert {:child_restarted, _restart_info} = Parent.handle_message(message)
       assert Parent.child?(:child)
     end
 
@@ -285,19 +295,9 @@ defmodule ParentTest do
       refute Parent.child?(:child)
     end
 
-    test "is not performed when :restart option is not provided" do
-      Parent.initialize()
-      {:ok, child} = start_child(id: :child)
-      Process.exit(child, :kill)
-
-      assert_receive message
-      refute match?({:child_restarted, _restart_info}, Parent.handle_message(message))
-      refute Parent.child?(:child)
-    end
-
     test "is not performed when a child is terminated via `Parent` function" do
       Parent.initialize()
-      {:ok, _child} = start_child(id: :child, restart: :permanent)
+      {:ok, _child} = start_child(id: :child)
       Parent.shutdown_child(:child)
 
       refute_receive _
@@ -307,7 +307,7 @@ defmodule ParentTest do
     test "preserves startup order" do
       Parent.initialize()
       {:ok, child1} = start_child(id: :child1)
-      {:ok, child2} = start_child(id: :child2, restart: :permanent, meta: :meta)
+      {:ok, child2} = start_child(id: :child2, meta: :meta)
       {:ok, child3} = start_child(id: :child3)
 
       Agent.stop(child2)
@@ -325,7 +325,7 @@ defmodule ParentTest do
       fun = fn -> if :persistent_term.get(key), do: raise("error") end
       start = {Agent, :start_link, [fun]}
 
-      {:ok, child} = start_child(id: :child, restart: :permanent, start: start)
+      {:ok, child} = start_child(id: :child, start: start)
 
       :persistent_term.put(key, true)
       Process.exit(child, :kill)
@@ -344,9 +344,9 @@ defmodule ParentTest do
     test "also restarts non-temporary dependees" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1, restart: :permanent)
-      {:ok, child2} = start_child(id: :child2, restart: :permanent, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, binds_to: [:child2])
+      {:ok, child1} = start_child(id: :child1)
+      {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
+      {:ok, child3} = start_child(id: :child3, restart: :never, binds_to: [:child2])
       {:ok, child4} = start_child(id: :child4)
 
       Process.monitor(child2)
@@ -397,7 +397,7 @@ defmodule ParentTest do
     test "clears recorded restarts after the interval has passed" do
       Parent.initialize()
 
-      {:ok, _} = start_child(id: :child1, restart: :permanent, restart: %{max: 2, in: 100})
+      {:ok, _} = start_child(id: :child1, restart: %{max: 2, in: 100})
       {:ok, _} = start_child(id: :child2)
 
       Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
@@ -634,7 +634,7 @@ defmodule ParentTest do
   describe "handle_message/1" do
     test "handles child termination" do
       Parent.initialize()
-      child = start_child!(id: :child, meta: :meta)
+      child = start_child!(id: :child, meta: :meta, restart: :never)
       GenServer.stop(child)
       assert_receive {:EXIT, ^child, _reason} = message
 
@@ -651,10 +651,10 @@ defmodule ParentTest do
     test "terminates dependencies if a child stops" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1)
-      {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, binds_to: [:child2])
-      {:ok, _child4} = start_child(id: :child4)
+      {:ok, child1} = start_child(id: :child1, restart: :never)
+      {:ok, child2} = start_child(id: :child2, restart: :never, binds_to: [:child1])
+      {:ok, child3} = start_child(id: :child3, restart: :never, binds_to: [:child2])
+      {:ok, _child4} = start_child(id: :child4, restart: :never)
 
       Enum.each([child2, child3], &Process.monitor/1)
 
@@ -678,7 +678,7 @@ defmodule ParentTest do
 
     test "handles child timeout by stopping the child" do
       Parent.initialize()
-      child = start_child!(id: :child, meta: :meta, timeout: 0)
+      child = start_child!(id: :child, restart: :never, meta: :meta, timeout: 0)
 
       assert_receive {Parent, :child_timeout, ^child} = message
 

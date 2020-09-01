@@ -341,7 +341,7 @@ defmodule Parent do
     %{
       meta: nil,
       timeout: :infinity,
-      restart: :never,
+      restart: :permanent,
       binds_to: [],
       max_restarts: {5, :timer.seconds(3)}
     }
