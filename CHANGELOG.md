@@ -1,7 +1,7 @@
 # 0.11.0
 
 ## Breaking changes
-- Children are by default permanent, so they are automatically restarted. This also means that `GenServer.handle_child_terminated` won't be invoked. To retain the previous behaviour of your existing parent processes you need to explicitly set the `:restart` option of your children to `:never`.
+- Children are by default permanent, so they are automatically restarted. This also means that `GenServer.handle_child_terminated` won't be invoked. To retain the previous behaviour of your existing parent processes you need to explicitly set the `:restart` option of your children to `:temporary`.
 - `handle_child_terminated/5` callback of `Parent.GenServer` is replaced with `handle_child_terminated/2`.
 - Return type of `Parent.children/0` has changed. Refer to documentation for details.
 - Return type of `Parent.handle_message/1` has changed. Refer to documentation for details.

@@ -36,11 +36,12 @@ defmodule Parent do
   alias Parent.State
 
   @type opts :: [option]
-  @type option :: {:restart, parent_restart}
+  @type option :: {:restart, restart}
 
-  @type parent_restart ::
-          :never
-          | %{optional(:max) => pos_integer, optional(:in) => pos_integer}
+  @type restart :: :never | restart_limit
+  @type child_restart ::
+          :temporary | :permanent | :transient | {:permanent | :transient, restart_limit}
+  @type restart_limit :: [max: pos_integer, in: pos_integer]
 
   @type child_spec :: %{
           :id => child_id,
@@ -50,7 +51,7 @@ defmodule Parent do
           optional(:meta) => child_meta,
           optional(:shutdown) => shutdown,
           optional(:timeout) => pos_integer | :infinity,
-          optional(:restart) => restart,
+          optional(:restart) => child_restart,
           optional(:binds_to) => [child_id],
           optional(:max_restarts) => {limit :: pos_integer, interval :: pos_integer} | :infinity
         }
@@ -61,17 +62,6 @@ defmodule Parent do
   @type start :: (() -> Supervisor.on_start_child()) | {module, atom, [term]}
 
   @type shutdown :: non_neg_integer() | :infinity | :brutal_kill
-
-  @type restart ::
-          :temporary
-          | :permanent
-          | :transient
-          | :never
-          | %{
-              optional(:on) => :exit | :crash,
-              optional(:max) => pos_integer | :infinity,
-              optional(:in) => pos_integer
-            }
 
   @type child :: %{id: child_id, pid: pid, meta: child_meta}
 
@@ -354,11 +344,10 @@ defmodule Parent do
     }
   end
 
-  defp normalize_restart(:never), do: :never
-  defp normalize_restart(:temporary), do: :never
-  defp normalize_restart(:transient), do: normalize_restart(%{on: :crash})
-  defp normalize_restart(:permanent), do: normalize_restart(%{on: :exit})
-  defp normalize_restart(opts), do: Map.merge(%{on: :exit, max: 3, in: :timer.seconds(5)}, opts)
+  defp normalize_restart(type) when type in ~w/temporary permanent transient/a, do: type
+
+  defp normalize_restart({type, opts}),
+    do: {type, Keyword.merge([max: 3, in: :timer.seconds(5)], opts)}
 
   defp default_type_and_shutdown_spec(:worker), do: %{type: :worker, shutdown: :timer.seconds(5)}
   defp default_type_and_shutdown_spec(:supervisor), do: %{type: :supervisor, shutdown: :infinity}
@@ -454,7 +443,7 @@ defmodule Parent do
     if requires_restart?(stopped_child, reason) do
       state =
         bound_siblings
-        |> Stream.reject(&(&1.spec.restart == :never))
+        |> Stream.reject(&(&1.spec.restart == :temporary))
         |> Stream.concat([stopped_child])
         |> Enum.reduce(state, &record_restart!(&2, &1, stopped_child))
 
@@ -485,12 +474,14 @@ defmodule Parent do
     exit(exit)
   end
 
-  defp requires_restart?(%{spec: %{restart: :never}}, _reason), do: false
-  defp requires_restart?(%{spec: %{restart: %{on: :exit}}}, _reason), do: true
-  defp requires_restart?(%{spec: %{restart: %{on: :crash}}}, reason), do: reason != :normal
+  defp requires_restart?(%{spec: %{restart: :temporary}}, _reason), do: false
+  defp requires_restart?(%{spec: %{restart: :permanent}}, _reason), do: true
+  defp requires_restart?(%{spec: %{restart: {:permanent, _opts}}}, _reason), do: true
+  defp requires_restart?(%{spec: %{restart: :transient}}, reason), do: reason != :normal
+  defp requires_restart?(%{spec: %{restart: {:transient, _opts}}}, reason), do: reason != :normal
 
   defp restart_child_and_bound_siblings(state, child, bound_siblings) do
-    {terminated, restarted} = Enum.split_with(bound_siblings, &(&1.spec.restart == :never))
+    {terminated, restarted} = Enum.split_with(bound_siblings, &(&1.spec.restart == :temporary))
     state = Enum.reduce([child | restarted], state, &restart_child!(&2, &1))
 
     info = %{

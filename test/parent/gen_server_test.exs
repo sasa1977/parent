@@ -92,7 +92,7 @@ defmodule Parent.GenServerTest do
         start: {Agent, :start_link, [fn -> :ok end]},
         meta: :meta,
         type: :worker,
-        restart: :never
+        restart: :temporary
       }).pid
 
     :erlang.trace(parent, true, [:call])
@@ -147,7 +147,7 @@ defmodule Parent.GenServerTest do
   end
 
   test "passes parent restart option" do
-    parent = start_test_server!(name: :registered_name, restart: %{max: 1})
+    parent = start_test_server!(name: :registered_name, restart: [max: 1])
     Process.monitor(parent)
 
     :erlang.trace(parent, true, [:call])

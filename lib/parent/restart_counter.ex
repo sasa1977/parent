@@ -14,12 +14,18 @@ defmodule Parent.RestartCounter do
                    do: __MODULE__.TimeProvider.Test,
                    else: __MODULE__.TimeProvider.Monotonic
 
-  @spec new(:never | {pos_integer, pos_integer}) :: t
-  def new(:never), do: :never
-  def new(%{limit: :infinity}), do: :never
+  @spec new(Parent.child_restart()) :: t
+  def new(:temporary), do: :never
+  def new(type) when type in ~w/transient permanent/a, do: :never
 
-  def new(restart),
-    do: %{max_restarts: restart.max, interval: restart.in, recorded: :queue.new(), size: 0}
+  def new({_type, opts}) do
+    %{
+      max_restarts: Keyword.fetch!(opts, :max),
+      interval: Keyword.fetch!(opts, :in),
+      recorded: :queue.new(),
+      size: 0
+    }
+  end
 
   @spec record_restart(t) :: {:ok, t} | :error
   def record_restart(:never), do: {:ok, :never}

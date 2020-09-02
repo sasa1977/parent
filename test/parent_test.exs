@@ -216,7 +216,7 @@ defmodule ParentTest do
 
       {:ok, child1} = start_child(id: :child1)
       {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, restart: :never, binds_to: [:child2])
+      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child2])
       {:ok, child4} = start_child(id: :child4)
 
       Process.monitor(child2)
@@ -255,7 +255,7 @@ defmodule ParentTest do
 
     test "is performed when a transient child terminates abnormally" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, restart: %{on: :crash}, meta: :meta)
+      {:ok, child} = start_child(id: :child, restart: :transient, meta: :meta)
       Process.exit(child, :kill)
 
       assert_receive message
@@ -287,7 +287,7 @@ defmodule ParentTest do
 
     test "is not performed when a temporary child terminates" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, restart: :never)
+      {:ok, child} = start_child(id: :child, restart: :temporary)
       Process.exit(child, :kill)
 
       assert_receive message
@@ -346,7 +346,7 @@ defmodule ParentTest do
 
       {:ok, child1} = start_child(id: :child1)
       {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, restart: :never, binds_to: [:child2])
+      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child2])
       {:ok, child4} = start_child(id: :child4)
 
       Process.monitor(child2)
@@ -369,11 +369,11 @@ defmodule ParentTest do
     end
 
     test "takes down the entire parent on too many global restarts" do
-      Parent.initialize(restart: %{max: 2})
+      Parent.initialize(restart: [max: 2])
       Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
 
-      {:ok, _} = start_child(id: :child1, restart: %{max: :infinity})
-      {:ok, _} = start_child(id: :child2, restart: %{max: :infinity})
+      {:ok, _} = start_child(id: :child1)
+      {:ok, _} = start_child(id: :child2)
 
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
@@ -398,7 +398,7 @@ defmodule ParentTest do
       Parent.initialize()
       Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
 
-      {:ok, _} = start_child(id: :child1, restart: %{max: 2, in: 100})
+      {:ok, _} = start_child(id: :child1, restart: {:permanent, max: 2, in: 100})
       {:ok, _} = start_child(id: :child2)
 
       {:ok, pid} = Parent.child_pid(:child1)
@@ -423,7 +423,7 @@ defmodule ParentTest do
     test "clears recorded restarts after the interval has passed" do
       Parent.initialize()
 
-      {:ok, _} = start_child(id: :child1, restart: %{max: 2, in: 100})
+      {:ok, _} = start_child(id: :child1, restart: {:permanent, max: 2, in: 100})
       {:ok, _} = start_child(id: :child2)
 
       Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
@@ -660,7 +660,7 @@ defmodule ParentTest do
   describe "handle_message/1" do
     test "handles child termination" do
       Parent.initialize()
-      child = start_child!(id: :child, meta: :meta, restart: :never)
+      child = start_child!(id: :child, meta: :meta, restart: :temporary)
       GenServer.stop(child)
       assert_receive {:EXIT, ^child, _reason} = message
 
@@ -677,10 +677,10 @@ defmodule ParentTest do
     test "terminates dependencies if a child stops" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1, restart: :never)
-      {:ok, child2} = start_child(id: :child2, restart: :never, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, restart: :never, binds_to: [:child2])
-      {:ok, _child4} = start_child(id: :child4, restart: :never)
+      {:ok, child1} = start_child(id: :child1, restart: :temporary)
+      {:ok, child2} = start_child(id: :child2, restart: :temporary, binds_to: [:child1])
+      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child2])
+      {:ok, _child4} = start_child(id: :child4, restart: :temporary)
 
       Enum.each([child2, child3], &Process.monitor/1)
 
@@ -704,7 +704,7 @@ defmodule ParentTest do
 
     test "handles child timeout by stopping the child" do
       Parent.initialize()
-      child = start_child!(id: :child, restart: :never, meta: :meta, timeout: 0)
+      child = start_child!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
 
       assert_receive {Parent, :child_timeout, ^child} = message
 
