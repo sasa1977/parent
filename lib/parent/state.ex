@@ -25,26 +25,14 @@ defmodule Parent.State do
 
   @spec initialize(Parent.opts()) :: t
   def initialize(opts) do
-    opts =
-      [restart: [max: 3, in: :timer.seconds(5)]]
-      |> Keyword.merge(opts)
-      |> Keyword.update!(:restart, fn
-        :never -> :never
-        restart -> Keyword.merge([max: 3, in: :timer.seconds(5)], restart)
-      end)
-
-    restart =
-      case Keyword.fetch!(opts, :restart) do
-        :never -> :temporary
-        restart -> {:permanent, restart}
-      end
+    opts = Keyword.merge([max_restarts: 3, max_seconds: 5], opts)
 
     %{
       opts: opts,
       id_to_pid: %{},
       children: %{},
       startup_index: 0,
-      restart_counter: RestartCounter.new(restart)
+      restart_counter: RestartCounter.new(opts)
     }
   end
 

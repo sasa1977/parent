@@ -36,12 +36,9 @@ defmodule Parent do
   alias Parent.State
 
   @type opts :: [option]
-  @type option :: {:restart, restart}
-
-  @type restart :: :never | restart_limit
-  @type child_restart ::
-          :temporary | :permanent | :transient | {:permanent | :transient, restart_limit}
-  @type restart_limit :: [max: pos_integer, in: pos_integer]
+  @type option :: {:restart, restart_limit}
+  @type restart :: :temporary | :permanent | :transient | {:permanent | :transient, restart_limit}
+  @type restart_limit :: [max_restarts: non_neg_integer | :infinity, max_seconds: pos_integer]
 
   @type child_spec :: %{
           :id => child_id,
@@ -51,7 +48,7 @@ defmodule Parent do
           optional(:meta) => child_meta,
           optional(:shutdown) => shutdown,
           optional(:timeout) => pos_integer | :infinity,
-          optional(:restart) => child_restart,
+          optional(:restart) => restart,
           optional(:binds_to) => [child_id],
           optional(:max_restarts) => {limit :: pos_integer, interval :: pos_integer} | :infinity
         }
@@ -344,10 +341,13 @@ defmodule Parent do
     }
   end
 
-  defp normalize_restart(type) when type in ~w/temporary permanent transient/a, do: type
+  defp normalize_restart(:temporary), do: :temporary
+
+  defp normalize_restart(type) when type in ~w/temporary permanent transient/a,
+    do: normalize_restart({type, max_restarts: :infinity})
 
   defp normalize_restart({type, opts}),
-    do: {type, Keyword.merge([max: 3, in: :timer.seconds(5)], opts)}
+    do: {type, Keyword.merge([max_restarts: :infinity, max_seconds: 5], opts)}
 
   defp default_type_and_shutdown_spec(:worker), do: %{type: :worker, shutdown: :timer.seconds(5)}
   defp default_type_and_shutdown_spec(:supervisor), do: %{type: :supervisor, shutdown: :infinity}
@@ -461,9 +461,7 @@ defmodule Parent do
   end
 
   defp requires_restart?(%{spec: %{restart: :temporary}}, _reason), do: false
-  defp requires_restart?(%{spec: %{restart: :permanent}}, _reason), do: true
   defp requires_restart?(%{spec: %{restart: {:permanent, _opts}}}, _reason), do: true
-  defp requires_restart?(%{spec: %{restart: :transient}}, reason), do: reason != :normal
   defp requires_restart?(%{spec: %{restart: {:transient, _opts}}}, reason), do: reason != :normal
 
   defp restart_child_and_bound_siblings(state, child, bound_siblings) do

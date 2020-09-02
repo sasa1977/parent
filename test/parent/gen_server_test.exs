@@ -147,7 +147,7 @@ defmodule Parent.GenServerTest do
   end
 
   test "passes parent restart option" do
-    parent = start_test_server!(name: :registered_name, restart: [max: 1])
+    parent = start_test_server!(name: :registered_name, max_restarts: 1, max_seconds: 1)
     Process.monitor(parent)
 
     :erlang.trace(parent, true, [:call])

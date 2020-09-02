@@ -246,8 +246,7 @@ defmodule ParentTest do
       {:ok, child} = start_child(id: :child, meta: :meta)
       Agent.stop(child)
 
-      assert_receive message
-      assert {:child_restarted, restart_info} = Parent.handle_message(message)
+      assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.id == :child
       assert restart_info.reason == :normal
       assert Parent.child?(:child)
@@ -258,8 +257,7 @@ defmodule ParentTest do
       {:ok, child} = start_child(id: :child, restart: :transient, meta: :meta)
       Process.exit(child, :kill)
 
-      assert_receive message
-      assert {:child_restarted, restart_info} = Parent.handle_message(message)
+      assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.id == :child
       assert Parent.child?(:child)
     end
@@ -268,8 +266,7 @@ defmodule ParentTest do
       Parent.initialize()
       {:ok, _child} = start_child(id: :child, meta: :meta, timeout: 0)
 
-      assert_receive message
-      assert {:child_restarted, restart_info} = Parent.handle_message(message)
+      assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.id == :child
       assert restart_info.reason == :timeout
       assert Parent.child?(:child)
@@ -280,8 +277,7 @@ defmodule ParentTest do
       {:ok, child} = start_child(id: :child)
       Agent.stop(child)
 
-      assert_receive message
-      assert {:child_restarted, _restart_info} = Parent.handle_message(message)
+      assert {:child_restarted, _restart_info} = handle_parent_message()
       assert Parent.child?(:child)
     end
 
@@ -290,8 +286,7 @@ defmodule ParentTest do
       {:ok, child} = start_child(id: :child, restart: :temporary)
       Process.exit(child, :kill)
 
-      assert_receive message
-      refute match?({:child_restarted, _restart_info}, Parent.handle_message(message))
+      refute match?({:child_restarted, _restart_info}, handle_parent_message())
       refute Parent.child?(:child)
     end
 
@@ -311,8 +306,8 @@ defmodule ParentTest do
       {:ok, child3} = start_child(id: :child3)
 
       Agent.stop(child2)
-      assert_receive message
-      {:child_restarted, _} = Parent.handle_message(message)
+
+      {:child_restarted, _} = handle_parent_message()
       {:ok, child2} = Parent.child_pid(:child2)
       assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
@@ -330,11 +325,9 @@ defmodule ParentTest do
       :persistent_term.put(key, true)
       Process.exit(child, :kill)
 
-      assert_receive message
-
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert catch_exit(Parent.handle_message(message)) == :restart_error
+          assert catch_exit(handle_parent_message()) == :restart_error
         end)
 
       assert log =~ "[error] Failed to restart child :child"
@@ -352,8 +345,7 @@ defmodule ParentTest do
       Process.monitor(child2)
       Agent.stop(child1)
 
-      assert_receive message
-      assert {:child_restarted, restart_info} = Parent.handle_message(message)
+      assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.also_restarted == [:child2]
 
       assert restart_info.also_terminated == [%{id: :child3, meta: nil, pid: child3}]
@@ -369,7 +361,7 @@ defmodule ParentTest do
     end
 
     test "takes down the entire parent on too many global restarts" do
-      Parent.initialize(restart: [max: 2])
+      Parent.initialize(max_restarts: 2)
       Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
 
       {:ok, _} = start_child(id: :child1)
@@ -377,18 +369,17 @@ defmodule ParentTest do
 
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
-      Parent.handle_message(assert_receive message)
+      handle_parent_message()
 
       {:ok, pid} = Parent.child_pid(:child2)
       Agent.stop(pid)
-      Parent.handle_message(assert_receive message)
+      handle_parent_message()
 
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
 
       assert ExUnit.CaptureLog.capture_log(fn ->
-               assert catch_exit(Parent.handle_message(assert_receive message)) ==
-                        :too_many_restarts
+               assert catch_exit(handle_parent_message()) == :too_many_restarts
              end) =~ "[error] Too many restarts in parent process"
 
       assert Parent.children() == []
@@ -398,23 +389,22 @@ defmodule ParentTest do
       Parent.initialize()
       Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
 
-      {:ok, _} = start_child(id: :child1, restart: {:permanent, max: 2, in: 100})
+      {:ok, _} = start_child(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 1})
       {:ok, _} = start_child(id: :child2)
 
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
-      Parent.handle_message(assert_receive message)
+      handle_parent_message()
 
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
-      Parent.handle_message(assert_receive message)
+      handle_parent_message()
 
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
 
       assert ExUnit.CaptureLog.capture_log(fn ->
-               assert catch_exit(Parent.handle_message(assert_receive message)) ==
-                        :too_many_restarts
+               assert catch_exit(handle_parent_message()) == :too_many_restarts
              end) =~ "[error] Too many restarts in parent process"
 
       assert Parent.children() == []
@@ -423,23 +413,23 @@ defmodule ParentTest do
     test "clears recorded restarts after the interval has passed" do
       Parent.initialize()
 
-      {:ok, _} = start_child(id: :child1, restart: {:permanent, max: 2, in: 100})
+      {:ok, _} = start_child(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 2})
       {:ok, _} = start_child(id: :child2)
 
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> :timer.seconds(0) end)
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
-      Parent.handle_message(assert_receive message)
+      handle_parent_message()
 
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 100 end)
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> :timer.seconds(1) end)
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
-      Parent.handle_message(assert_receive message)
+      handle_parent_message()
 
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 200 end)
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> :timer.seconds(2) end)
       {:ok, pid} = Parent.child_pid(:child1)
       Agent.stop(pid)
-      Parent.handle_message(assert_receive message)
+      handle_parent_message()
     end
   end
 
@@ -662,9 +652,8 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child, meta: :meta, restart: :temporary)
       GenServer.stop(child)
-      assert_receive {:EXIT, ^child, _reason} = message
 
-      assert Parent.handle_message(message) ==
+      assert handle_parent_message() ==
                {:child_terminated,
                 %{id: :child, meta: :meta, pid: child, reason: :normal, also_terminated: []}}
 
@@ -685,9 +674,8 @@ defmodule ParentTest do
       Enum.each([child2, child3], &Process.monitor/1)
 
       GenServer.stop(child1)
-      assert_receive {:EXIT, ^child1, _reason} = message
 
-      assert {:child_terminated, info} = Parent.handle_message(message)
+      assert {:child_terminated, info} = handle_parent_message()
 
       assert info.also_terminated == [
                %{id: :child2, meta: nil, pid: child2},
@@ -706,9 +694,7 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
 
-      assert_receive {Parent, :child_timeout, ^child} = message
-
-      assert Parent.handle_message(message) ==
+      assert handle_parent_message() ==
                {:child_terminated,
                 %{id: :child, meta: :meta, pid: child, reason: :timeout, also_terminated: []}}
 
@@ -731,11 +717,8 @@ defmodule ParentTest do
                    [active: 1, specs: 1, supervisors: 0, workers: 1]
         end)
 
-      assert_receive message
-      assert Parent.handle_message(message) == :ignore
-
-      assert_receive message
-      assert Parent.handle_message(message) == :ignore
+      assert handle_parent_message() == :ignore
+      assert handle_parent_message() == :ignore
 
       Task.await(task)
     end
@@ -766,4 +749,7 @@ defmodule ParentTest do
     {:ok, pid} = start_child(overrides)
     pid
   end
+
+  defp handle_parent_message,
+    do: Parent.handle_message(assert_receive message)
 end

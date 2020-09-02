@@ -179,7 +179,7 @@ defmodule Parent.GenServer do
   @spec start_link(module, arg :: term, [Parent.option() | GenServer.option()]) ::
           GenServer.on_start()
   def start_link(module, arg, options \\ []) do
-    {parent_opts, gen_server_opts} = Keyword.split(options, ~w/restart/a)
+    {parent_opts, gen_server_opts} = Keyword.split(options, ~w/max_restarts max_seconds/a)
     GenServer.start_link(__MODULE__, {module, arg, parent_opts}, gen_server_opts)
   end
 
