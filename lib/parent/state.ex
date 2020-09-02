@@ -22,50 +22,47 @@ defmodule Parent.State do
   @spec initialize() :: t
   def initialize(), do: %{id_to_pid: %{}, children: %{}, startup_index: 0}
 
-  @spec register_child(
-          t,
-          pid,
-          Parent.child_spec(),
-          reference | nil,
-          non_neg_integer() | nil,
-          term
-        ) :: t
-  def register_child(state, pid, spec, timer_ref, startup_index, restart_counter) do
+  @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
+  def register_child(state, pid, spec, timer_ref) do
     false = Map.has_key?(state.children, pid)
     false = Map.has_key?(state.id_to_pid, spec.id)
 
-    dependencies =
-      Enum.reduce(
-        spec.binds_to,
-        MapSet.new(spec.binds_to),
-        &MapSet.union(&2, child!(state, id: &1).dependencies)
-      )
-
-    state =
-      Enum.reduce(
-        dependencies,
-        state,
-        fn dep_id, state ->
-          update!(state, [id: dep_id], fn dep ->
-            update_in(dep.bound_siblings, &MapSet.put(&1, spec.id))
-          end)
-        end
-      )
+    {dependencies, state} = update_dependencies(state, spec)
 
     child = %{
       spec: spec,
       pid: pid,
       timer_ref: timer_ref,
-      startup_index: startup_index || state.startup_index,
+      startup_index: state.startup_index,
       dependencies: dependencies,
       bound_siblings: MapSet.new(),
-      restart_counter: restart_counter || Parent.RestartCounter.new(spec.restart)
+      restart_counter: Parent.RestartCounter.new(spec.restart)
     }
 
     state
     |> put_in([:id_to_pid, spec.id], pid)
     |> put_in([:children, pid], child)
-    |> update_in([:startup_index], &if(is_nil(startup_index), do: &1 + 1, else: &1))
+    |> update_in([:startup_index], &(&1 + 1))
+  end
+
+  @spec register_child(t, pid, child, reference | nil) :: t
+  def reregister_child(state, child, pid, timer_ref) do
+    false = Map.has_key?(state.children, pid)
+    false = Map.has_key?(state.id_to_pid, child.spec.id)
+
+    {dependencies, state} = update_dependencies(state, child.spec)
+
+    child = %{
+      child
+      | pid: pid,
+        timer_ref: timer_ref,
+        dependencies: dependencies,
+        bound_siblings: MapSet.new()
+    }
+
+    state
+    |> put_in([:id_to_pid, child.spec.id], child.pid)
+    |> put_in([:children, child.pid], child)
   end
 
   @spec children(t) :: [child()]
@@ -149,5 +146,27 @@ defmodule Parent.State do
   defp update!(state, filter, updater) do
     {:ok, state} = update(state, filter, updater)
     state
+  end
+
+  defp update_dependencies(state, spec) do
+    dependencies =
+      Enum.reduce(
+        spec.binds_to,
+        MapSet.new(spec.binds_to),
+        &MapSet.union(&2, child!(state, id: &1).dependencies)
+      )
+
+    state =
+      Enum.reduce(
+        dependencies,
+        state,
+        fn dep_id, state ->
+          update!(state, [id: dep_id], fn dep ->
+            update_in(dep.bound_siblings, &MapSet.put(&1, spec.id))
+          end)
+        end
+      )
+
+    {dependencies, state}
   end
 end

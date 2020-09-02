@@ -112,10 +112,11 @@ defmodule Parent do
   @spec start_child(child_spec | module | {module, term}) :: Supervisor.on_start_child()
   def start_child(child_spec) do
     state = state()
-    full_child_spec = expand_child_spec(child_spec)
+    child_spec = expand_child_spec(child_spec)
 
-    with :ok <- validate_id(state, full_child_spec.id),
-         {:ok, pid, state} <- do_start_child(state, full_child_spec) do
+    with :ok <- validate_id(state, child_spec.id),
+         {:ok, pid, timer_ref} <- start_child_process(state, child_spec) do
+      state = State.register_child(state, pid, child_spec, timer_ref)
       store(state)
       {:ok, pid}
     end
@@ -368,19 +369,16 @@ defmodule Parent do
     end
   end
 
-  defp do_start_child(state, child_spec, startup_index \\ nil, restart_counter \\ nil) do
+  defp start_child_process(state, child_spec) do
     with :ok <- check_bindings(state, child_spec),
-         {:ok, pid} <- start_child_process(child_spec.start) do
+         {:ok, pid} <- invoke_start_function(child_spec.start) do
       timer_ref =
         case child_spec.timeout do
           :infinity -> nil
           timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
         end
 
-      state =
-        State.register_child(state, pid, child_spec, timer_ref, startup_index, restart_counter)
-
-      {:ok, pid, state}
+      {:ok, pid, timer_ref}
     end
   end
 
@@ -391,8 +389,8 @@ defmodule Parent do
     end
   end
 
-  defp start_child_process({mod, fun, args}), do: apply(mod, fun, args)
-  defp start_child_process(fun) when is_function(fun, 0), do: fun.()
+  defp invoke_start_function({mod, fun, args}), do: apply(mod, fun, args)
+  defp invoke_start_function(fun) when is_function(fun, 0), do: fun.()
 
   defp do_handle_message(state, {:EXIT, pid, reason}) do
     case State.child(state, pid: pid) do
@@ -487,21 +485,22 @@ defmodule Parent do
 
   defp restart_child_and_bound_siblings(state, child, bound_siblings) do
     {terminated, restarted} = Enum.split_with(bound_siblings, &(&1.spec.restart == :never))
+    state = Enum.reduce([child | restarted], state, &restart_child!(&2, &1))
 
-    state = Enum.reduce([child | restarted], state, &start_new_instance!(&2, &1))
+    info = %{
+      also_terminated: Enum.map(terminated, &terminated_info/1),
+      also_restarted: Enum.map(restarted, & &1.spec.id)
+    }
 
-    terminated = Enum.map(terminated, &terminated_info/1)
-    restarted = Enum.map(restarted, & &1.spec.id)
-    info = %{also_terminated: terminated, also_restarted: restarted}
     {info, state}
   end
 
   defp terminated_info(child), do: %{id: child.spec.id, pid: child.pid, meta: child.spec.meta}
 
-  defp start_new_instance!(state, child) do
-    case do_start_child(state, child.spec, child.startup_index, child.restart_counter) do
-      {:ok, _new_pid, state} ->
-        state
+  defp restart_child!(state, child) do
+    case start_child_process(state, child.spec) do
+      {:ok, new_pid, timer_ref} ->
+        State.reregister_child(state, child, new_pid, timer_ref)
 
       error ->
         error = "Failed to restart child #{inspect(child.spec.id)}: #{inspect(error)}."
