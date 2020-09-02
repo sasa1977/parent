@@ -418,15 +418,17 @@ defmodule Parent do
 
   defp handle_child_down(state, child, reason) do
     bound_siblings = bound_siblings(state, child)
-    {child, bound_siblings, state} = record_restart!(state, child, reason, bound_siblings)
     state = stop_children(state, Enum.reverse(bound_siblings), :shutdown)
-    {:ok, _child, state} = State.pop(state, pid: child.pid)
 
     if requires_restart?(child, reason) do
+      state = record_restart!(state, child)
+      {:ok, child, state} = State.pop(state, pid: child.pid)
       {info, state} = restart_child_and_bound_siblings(state, child, bound_siblings)
       info = Map.merge(info, %{id: child.spec.id, reason: reason})
       {{:child_restarted, info}, state}
     else
+      {:ok, _child, state} = State.pop(state, pid: child.pid)
+
       info = %{
         id: child.spec.id,
         pid: child.pid,
@@ -439,29 +441,13 @@ defmodule Parent do
     end
   end
 
-  defp record_restart!(state, stopped_child, reason, bound_siblings) do
-    if requires_restart?(stopped_child, reason) do
-      state =
-        bound_siblings
-        |> Stream.reject(&(&1.spec.restart == :temporary))
-        |> Stream.concat([stopped_child])
-        |> Enum.reduce(state, &record_restart!(&2, &1, stopped_child))
-
-      # need to reload the children because their restart counts have been updated
-      stopped_child = State.child!(state, id: stopped_child.spec.id)
-      {stopped_child, bound_siblings(state, stopped_child), state}
-    else
-      {stopped_child, bound_siblings, state}
-    end
-  end
-
-  defp record_restart!(state, child, stopped_child) do
+  defp record_restart!(state, child) do
     case State.record_restart(state, pid: child.pid) do
       {:ok, state} ->
         state
 
       :error ->
-        {:ok, _child, state} = State.pop(state, id: stopped_child.spec.id)
+        {:ok, _child, state} = State.pop(state, id: child.spec.id)
         error = "Too many restarts in parent process."
         give_up!(state, :too_many_restarts, error)
     end
