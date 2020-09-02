@@ -67,8 +67,8 @@ defmodule ParentTest do
 
     test "succeeds if deps are started" do
       Parent.initialize()
-      {:ok, _child} = start_child(id: :child1)
-      {:ok, _child} = start_child(id: :child2)
+      start_child!(id: :child1)
+      start_child!(id: :child2)
       assert {:ok, _pid} = start_child(binds_to: ~w/child1 child2/a)
     end
 
@@ -82,14 +82,15 @@ defmodule ParentTest do
 
     test "fails if the id is already taken" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child)
+      child = start_child!(id: :child)
       assert start_child(id: :child) == {:error, {:already_started, child}}
     end
 
     test "fails if deps are not started" do
       Parent.initialize()
-      {:ok, _child} = start_child(id: :child1)
-      {:ok, _child} = start_child(id: :child2)
+      start_child!(id: :child1)
+      start_child!(id: :child2)
+
       assert {:error, error} = start_child(binds_to: ~w/child1 child2 child4 child5/a)
       assert error == {:missing_deps, ~w/child4 child5/a}
     end
@@ -102,10 +103,9 @@ defmodule ParentTest do
   describe "shutdown_child/1" do
     test "stops the child synchronously, handling the exit message" do
       Parent.initialize()
-
-      {:ok, child} = Parent.start_child(Supervisor.child_spec(TestChild, id: :child))
-
+      child = start_child!(id: :child)
       Parent.shutdown_child(:child)
+
       refute Process.alive?(child)
       refute_receive {:EXIT, ^child, _reason}
     end
@@ -113,12 +113,11 @@ defmodule ParentTest do
     test "forcefully terminates the child if shutdown is `:brutal_kill`" do
       Parent.initialize()
 
-      {:ok, child} =
-        Parent.start_child(
-          Supervisor.child_spec({TestChild, block_terminate?: true, trap_exit?: true},
-            id: :child,
-            shutdown: :brutal_kill
-          )
+      child =
+        start_child!(
+          [id: :child, shutdown: :brutal_kill],
+          block_terminate?: true,
+          trap_exit?: true
         )
 
       Process.monitor(child)
@@ -129,12 +128,11 @@ defmodule ParentTest do
     test "forcefully terminates a child if it doesn't stop in the given time" do
       Parent.initialize()
 
-      {:ok, child} =
-        Parent.start_child(
-          Supervisor.child_spec({TestChild, block_terminate?: true, trap_exit?: true},
-            id: :child,
-            shutdown: 10
-          )
+      child =
+        start_child!(
+          [id: :child, shutdown: 10],
+          block_terminate?: true,
+          trap_exit?: true
         )
 
       Process.monitor(child)
@@ -152,10 +150,10 @@ defmodule ParentTest do
 
     test "stops all dependencies in the opposite startup order" do
       Parent.initialize()
-      {:ok, child1} = start_child(id: :child1)
-      {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, binds_to: [:child2])
-      {:ok, _child4} = start_child(id: :child4)
+      child1 = start_child!(id: :child1)
+      child2 = start_child!(id: :child2, binds_to: [:child1])
+      child3 = start_child!(id: :child3, binds_to: [:child2])
+      _child4 = start_child!(id: :child4)
 
       Enum.each([child1, child2, child3], &Process.monitor/1)
       Parent.shutdown_child(:child1)
@@ -177,7 +175,7 @@ defmodule ParentTest do
   describe "restart_child" do
     test "restarts the process and returns the new pid" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child)
+      child = start_child!(id: :child)
       assert Parent.restart_child(:child) == %{also_restarted: [], also_terminated: []}
       {:ok, new_pid} = Parent.child_pid(:child)
       refute new_pid == child
@@ -191,7 +189,7 @@ defmodule ParentTest do
       fun = fn -> if :persistent_term.get(key), do: raise("error") end
       start = {Agent, :start_link, [fun]}
 
-      {:ok, _} = start_child(id: :child, start: start)
+      start_child!(id: :child, start: start)
 
       :persistent_term.put(key, true)
 
@@ -202,9 +200,9 @@ defmodule ParentTest do
 
     test "preserves startup order" do
       Parent.initialize()
-      {:ok, child1} = start_child(id: :child1)
-      {:ok, _child2} = start_child(id: :child2)
-      {:ok, child3} = start_child(id: :child3)
+      child1 = start_child!(id: :child1)
+      _child2 = start_child!(id: :child2)
+      child3 = start_child!(id: :child3)
 
       Parent.restart_child(:child2)
       {:ok, child2} = Parent.child_pid(:child2)
@@ -214,10 +212,10 @@ defmodule ParentTest do
     test "also restarts non-temporary dependees" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1)
-      {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child2])
-      {:ok, child4} = start_child(id: :child4)
+      child1 = start_child!(id: :child1)
+      child2 = start_child!(id: :child2, binds_to: [:child1])
+      child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
+      child4 = start_child!(id: :child4)
 
       Process.monitor(child2)
       %{also_terminated: terminated, also_restarted: restarted} = Parent.restart_child(:child1)
@@ -243,28 +241,25 @@ defmodule ParentTest do
   describe "automatic child restart" do
     test "is performed when a permanent child terminates" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, meta: :meta)
-      Agent.stop(child)
+      pid1 = start_child!(id: :child, meta: :meta)
+      restart_info = provoke_child_restart!(:child, restart: :shutdown)
 
-      assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.id == :child
-      assert restart_info.reason == :normal
-      assert Parent.child?(:child)
+      assert restart_info.reason == :shutdown
+      assert [%{id: :child, meta: :meta, pid: pid2}] = Parent.children()
+      refute pid2 == pid1
     end
 
     test "is performed when a transient child terminates abnormally" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, restart: :transient, meta: :meta)
-      Process.exit(child, :kill)
-
-      assert {:child_restarted, restart_info} = handle_parent_message()
-      assert restart_info.id == :child
+      start_child!(id: :child, restart: :transient)
+      provoke_child_restart!(:child)
       assert Parent.child?(:child)
     end
 
     test "is performed when a child is terminated due to a timeout" do
       Parent.initialize()
-      {:ok, _child} = start_child(id: :child, meta: :meta, timeout: 0)
+      start_child!(id: :child, timeout: 0)
 
       assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.id == :child
@@ -274,16 +269,14 @@ defmodule ParentTest do
 
     test "is performed when :restart option is not provided" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child)
-      Agent.stop(child)
-
-      assert {:child_restarted, _restart_info} = handle_parent_message()
+      start_child!(id: :child)
+      provoke_child_restart!(:child)
       assert Parent.child?(:child)
     end
 
     test "is not performed when a temporary child terminates" do
       Parent.initialize()
-      {:ok, child} = start_child(id: :child, restart: :temporary)
+      child = start_child!(id: :child, restart: :temporary)
       Process.exit(child, :kill)
 
       refute match?({:child_restarted, _restart_info}, handle_parent_message())
@@ -292,7 +285,7 @@ defmodule ParentTest do
 
     test "is not performed when a child is terminated via `Parent` function" do
       Parent.initialize()
-      {:ok, _child} = start_child(id: :child)
+      start_child!(id: :child)
       Parent.shutdown_child(:child)
 
       refute_receive _
@@ -301,15 +294,11 @@ defmodule ParentTest do
 
     test "preserves startup order" do
       Parent.initialize()
-      {:ok, child1} = start_child(id: :child1)
-      {:ok, child2} = start_child(id: :child2, meta: :meta)
-      {:ok, child3} = start_child(id: :child3)
-
-      Agent.stop(child2)
-
-      {:child_restarted, _} = handle_parent_message()
-      {:ok, child2} = Parent.child_pid(:child2)
-      assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
+      start_child!(id: :child1)
+      start_child!(id: :child2)
+      start_child!(id: :child3)
+      provoke_child_restart!(:child2)
+      assert Enum.map(Parent.children(), & &1.id) == [:child1, :child2, :child3]
     end
 
     test "takes down the entire parent if the new instance fails to start" do
@@ -337,17 +326,15 @@ defmodule ParentTest do
     test "also restarts non-temporary dependees" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1)
-      {:ok, child2} = start_child(id: :child2, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child2])
-      {:ok, child4} = start_child(id: :child4)
+      child1 = start_child!(id: :child1)
+      child2 = start_child!(id: :child2, binds_to: [:child1])
+      child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
+      child4 = start_child!(id: :child4)
 
       Process.monitor(child2)
-      Agent.stop(child1)
+      restart_info = provoke_child_restart!(:child1)
 
-      assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.also_restarted == [:child2]
-
       assert restart_info.also_terminated == [%{id: :child3, meta: nil, pid: child3}]
 
       assert [
@@ -362,74 +349,90 @@ defmodule ParentTest do
 
     test "takes down the entire parent on too many global restarts" do
       Parent.initialize(max_restarts: 2)
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
 
-      {:ok, _} = start_child(id: :child1)
-      {:ok, _} = start_child(id: :child2)
+      start_child!(id: :child1)
+      start_child!(id: :child2)
+      start_child!(id: :child3)
 
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-      handle_parent_message()
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child2)
 
-      {:ok, pid} = Parent.child_pid(:child2)
-      Agent.stop(pid)
-      handle_parent_message()
-
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-
-      assert ExUnit.CaptureLog.capture_log(fn ->
-               assert catch_exit(handle_parent_message()) == :too_many_restarts
-             end) =~ "[error] Too many restarts in parent process"
-
+      log = assert_parent_exit(fn -> provoke_child_restart!(:child3) end, :too_many_restarts)
+      assert log =~ "[error] Too many restarts in parent process"
       assert Parent.children() == []
     end
 
-    test "takes down the entire parent on too many restarts of a single child" do
-      Parent.initialize()
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
+    test "default restart limit is 3 restarts in 5 seconds" do
+      Parent.initialize(max_restarts: 2)
 
-      {:ok, _} = start_child(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 1})
-      {:ok, _} = start_child(id: :child2)
+      start_child!(id: :child1)
+      start_child!(id: :child2)
+      start_child!(id: :child3)
 
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-      handle_parent_message()
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child2)
 
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-      handle_parent_message()
+      log =
+        assert_parent_exit(
+          fn -> provoke_child_restart!(:child3, at: 4999) end,
+          :too_many_restarts
+        )
 
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-
-      assert ExUnit.CaptureLog.capture_log(fn ->
-               assert catch_exit(handle_parent_message()) == :too_many_restarts
-             end) =~ "[error] Too many restarts in parent process"
-
+      assert log =~ "[error] Too many restarts in parent process"
       assert Parent.children() == []
+
+      start_child!(id: :child1)
+      start_child!(id: :child2)
+      start_child!(id: :child3)
+
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child2)
+      provoke_child_restart!(:child3, at: 5000)
+    end
+
+    test "takes down the entire parent on too many restarts of a single child" do
+      Parent.initialize(max_restarts: :infinity)
+
+      start_child!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 1})
+      start_child!(id: :child2)
+
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child1)
+
+      log = assert_parent_exit(fn -> provoke_child_restart!(:child1) end, :too_many_restarts)
+      assert log =~ "[error] Too many restarts in parent process"
+      assert Parent.children() == []
+    end
+
+    test "doesn't stop parent if max_restarts of the child is infinity" do
+      Parent.initialize(max_restarts: :infinity)
+      start_child!(id: :child1, restart: {:permanent, max_restarts: :infinity})
+
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child1)
+    end
+
+    test "default max_restarts of a child is infinity" do
+      Parent.initialize(max_restarts: :infinity)
+      start_child!(id: :child1)
+
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child1)
+      provoke_child_restart!(:child1)
     end
 
     test "clears recorded restarts after the interval has passed" do
       Parent.initialize()
 
-      {:ok, _} = start_child(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 2})
-      {:ok, _} = start_child(id: :child2)
+      start_child!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 2})
+      start_child!(id: :child2)
 
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> :timer.seconds(0) end)
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-      handle_parent_message()
-
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> :timer.seconds(1) end)
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-      handle_parent_message()
-
-      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> :timer.seconds(2) end)
-      {:ok, pid} = Parent.child_pid(:child1)
-      Agent.stop(pid)
-      handle_parent_message()
+      provoke_child_restart!(:child1, at: :timer.seconds(0))
+      provoke_child_restart!(:child1, at: :timer.seconds(1))
+      provoke_child_restart!(:child1, at: :timer.seconds(2))
     end
   end
 
@@ -736,20 +739,35 @@ defmodule ParentTest do
     end
   end
 
-  defp start_child(overrides \\ []) do
+  defp start_child(overrides \\ [], child_opts \\ []) do
     %{
       id: :erlang.unique_integer([:positive, :monotonic]),
-      start: {TestChild, :start_link, []}
+      start: {TestChild, :start_link, [child_opts]}
     }
     |> Map.merge(Map.new(overrides))
     |> Parent.start_child()
   end
 
-  defp start_child!(overrides \\ []) do
-    {:ok, pid} = start_child(overrides)
+  defp start_child!(overrides \\ [], child_opts \\ []) do
+    {:ok, pid} = start_child(overrides, child_opts)
     pid
   end
 
   defp handle_parent_message,
     do: Parent.handle_message(assert_receive message)
+
+  defp provoke_child_restart!(child_id, opts \\ []) do
+    now_ms = Keyword.get(opts, :at, 0)
+    Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> now_ms end)
+    {:ok, pid} = Parent.child_pid(child_id)
+    Process.exit(pid, Keyword.get(opts, :reason, :shutdown))
+    {:child_restarted, restart_info} = handle_parent_message()
+    restart_info
+  end
+
+  defp assert_parent_exit(fun, exit_reason) do
+    log = ExUnit.CaptureLog.capture_log(fn -> assert catch_exit(fun.()) == exit_reason end)
+    assert_receive {:EXIT, _string_io_pid, :normal}
+    log
+  end
 end
