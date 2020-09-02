@@ -141,6 +141,40 @@ defmodule Parent.GenServerTest do
     refute child.pid == child_pid
   end
 
+  test "registers the process" do
+    pid = start_test_server!(name: :registered_name)
+    assert Process.whereis(:registered_name) == pid
+  end
+
+  test "passes parent restart option" do
+    parent = start_test_server!(name: :registered_name, restart: %{max: 1})
+    Process.monitor(parent)
+
+    :erlang.trace(parent, true, [:call])
+    :erlang.trace_pattern({TestServer, :handle_child_restarted, 2}, [])
+
+    child_id = make_ref()
+
+    start_child(
+      parent,
+      Supervisor.child_spec({Agent, fn -> :ok end}, id: child_id)
+    )
+
+    Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
+
+    {:ok, child} = TestServer.call(parent, fn state -> {Parent.child_pid(child_id), state} end)
+    Process.exit(child, :kill)
+
+    assert_receive {:trace, ^parent, :call,
+                    {Parent.TestServer, :handle_child_restarted, [info, :initial_state]}}
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      {:ok, child} = TestServer.call(parent, fn state -> {Parent.child_pid(child_id), state} end)
+      Process.exit(child, :kill)
+      assert_receive {:DOWN, _, :process, ^parent, :too_many_restarts}
+    end)
+  end
+
   describe "supervisor" do
     test "which children" do
       pid = start_test_server!()
@@ -174,8 +208,8 @@ defmodule Parent.GenServerTest do
     end
   end
 
-  defp start_test_server! do
-    pid = start_supervised!({TestServer, fn -> :initial_state end})
+  defp start_test_server!(opts \\ []) do
+    pid = start_supervised!({TestServer, {fn -> :initial_state end, opts}})
     Mox.allow(Parent.RestartCounter.TimeProvider.Test, self(), pid)
     pid
   end

@@ -368,7 +368,33 @@ defmodule ParentTest do
       refute new_child2 == child2
     end
 
-    test "takes down the entire parent on too many restarts" do
+    test "takes down the entire parent on too many global restarts" do
+      Parent.initialize(restart: %{max: 2})
+      Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
+
+      {:ok, _} = start_child(id: :child1, restart: %{max: :infinity})
+      {:ok, _} = start_child(id: :child2, restart: %{max: :infinity})
+
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+      Parent.handle_message(assert_receive message)
+
+      {:ok, pid} = Parent.child_pid(:child2)
+      Agent.stop(pid)
+      Parent.handle_message(assert_receive message)
+
+      {:ok, pid} = Parent.child_pid(:child1)
+      Agent.stop(pid)
+
+      assert ExUnit.CaptureLog.capture_log(fn ->
+               assert catch_exit(Parent.handle_message(assert_receive message)) ==
+                        :too_many_restarts
+             end) =~ "[error] Too many restarts in parent process"
+
+      assert Parent.children() == []
+    end
+
+    test "takes down the entire parent on too many restarts of a single child" do
       Parent.initialize()
       Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
 
@@ -389,7 +415,7 @@ defmodule ParentTest do
       assert ExUnit.CaptureLog.capture_log(fn ->
                assert catch_exit(Parent.handle_message(assert_receive message)) ==
                         :too_many_restarts
-             end) =~ "[error] Too many restarts of child :child1"
+             end) =~ "[error] Too many restarts in parent process"
 
       assert Parent.children() == []
     end

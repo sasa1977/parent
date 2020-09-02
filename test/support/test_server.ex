@@ -1,7 +1,8 @@
 defmodule Parent.TestServer do
   use Parent.GenServer
 
-  def start_link(initializer), do: Parent.GenServer.start_link(__MODULE__, initializer)
+  def start_link({initializer, opts}),
+    do: Parent.GenServer.start_link(__MODULE__, initializer, opts)
 
   def call(pid, fun), do: GenServer.call(pid, fun)
 

@@ -35,6 +35,13 @@ defmodule Parent do
 
   alias Parent.State
 
+  @type opts :: [option]
+  @type option :: {:restart, parent_restart}
+
+  @type parent_restart ::
+          :never
+          | %{optional(:max) => pos_integer, optional(:in) => pos_integer}
+
   @type child_spec :: %{
           :id => child_id,
           :start => start,
@@ -97,11 +104,11 @@ defmodule Parent do
   module are used. If a parent behaviour, such as `Parent.GenServer`, is used, this function must
   not be invoked.
   """
-  @spec initialize() :: :ok
-  def initialize() do
+  @spec initialize(opts) :: :ok
+  def initialize(opts \\ []) do
     if initialized?(), do: raise("Parent state is already initialized")
     Process.flag(:trap_exit, true)
-    store(State.initialize())
+    store(State.initialize(opts))
   end
 
   @doc "Returns true if the parent state is initialized."
@@ -186,7 +193,7 @@ defmodule Parent do
     reason = with :normal <- reason, do: :shutdown
     stop_children(state(), Enum.reverse(State.children(state())), reason)
     # initializing the state to reset the startup index
-    store(State.initialize())
+    store(State.reinitialize(state()))
   end
 
   @doc """
@@ -343,8 +350,7 @@ defmodule Parent do
       meta: nil,
       timeout: :infinity,
       restart: :permanent,
-      binds_to: [],
-      max_restarts: {5, :timer.seconds(3)}
+      binds_to: []
     }
   end
 
@@ -467,7 +473,7 @@ defmodule Parent do
 
       :error ->
         {:ok, _child, state} = State.pop(state, id: stopped_child.spec.id)
-        error = "Too many restarts of child #{inspect(child.spec.id)}"
+        error = "Too many restarts in parent process."
         give_up!(state, :too_many_restarts, error)
     end
   end

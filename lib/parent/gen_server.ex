@@ -176,9 +176,12 @@ defmodule Parent.GenServer do
             when new_state: state
 
   @doc "Starts the parent process."
-  @spec start_link(module, arg :: term, GenServer.options()) :: GenServer.on_start()
-  def start_link(module, arg, options \\ []),
-    do: GenServer.start_link(__MODULE__, {module, arg}, options)
+  @spec start_link(module, arg :: term, [Parent.option() | GenServer.option()]) ::
+          GenServer.on_start()
+  def start_link(module, arg, options \\ []) do
+    {parent_opts, gen_server_opts} = Keyword.split(options, ~w/restart/a)
+    GenServer.start_link(__MODULE__, {module, arg, parent_opts}, gen_server_opts)
+  end
 
   @deprecated "Use Parent.start_child/1 instead"
   defdelegate start_child(child_spec), to: Parent
@@ -214,12 +217,12 @@ defmodule Parent.GenServer do
   defdelegate child?(id), to: Parent
 
   @impl GenServer
-  def init({callback, arg}) do
+  def init({callback, arg, options}) do
     # needed to simulate a supervisor
     Process.put(:"$initial_call", {:supervisor, callback, 1})
 
     Process.put({__MODULE__, :callback}, callback)
-    Parent.initialize()
+    Parent.initialize(options)
     invoke_callback(:init, [arg])
   end
 

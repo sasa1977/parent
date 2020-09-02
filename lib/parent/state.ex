@@ -1,10 +1,14 @@
 defmodule Parent.State do
   @moduledoc false
 
+  alias Parent.RestartCounter
+
   @opaque t :: %{
+            opts: Parent.opts(),
             id_to_pid: %{Parent.child_id() => pid},
             children: %{pid => child()},
-            startup_index: non_neg_integer
+            startup_index: non_neg_integer,
+            restart_counter: RestartCounter.t()
           }
 
   @type child :: %{
@@ -14,13 +18,32 @@ defmodule Parent.State do
           startup_index: non_neg_integer(),
           dependencies: MapSet.t(Parent.child_id()),
           bound_siblings: MapSet.t(Parent.child_id()),
-          restart_counter: Parent.RestartCounter.t()
+          restart_counter: RestartCounter.t()
         }
 
   @type filter :: [{:id, Parent.child_id()}] | [{:pid, pid}]
 
-  @spec initialize() :: t
-  def initialize(), do: %{id_to_pid: %{}, children: %{}, startup_index: 0}
+  @spec initialize(Parent.opts()) :: t
+  def initialize(opts) do
+    opts =
+      [restart: :never]
+      |> Keyword.merge(opts)
+      |> Keyword.update!(:restart, fn
+        :never -> :never
+        restart -> Map.merge(%{max: 3, in: :timer.seconds(5)}, restart)
+      end)
+
+    %{
+      opts: opts,
+      id_to_pid: %{},
+      children: %{},
+      startup_index: 0,
+      restart_counter: RestartCounter.new(Keyword.fetch!(opts, :restart))
+    }
+  end
+
+  @spec reinitialize(t) :: t
+  def reinitialize(state), do: initialize(state.opts)
 
   @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
   def register_child(state, pid, spec, timer_ref) do
@@ -36,7 +59,7 @@ defmodule Parent.State do
       startup_index: state.startup_index,
       dependencies: dependencies,
       bound_siblings: MapSet.new(),
-      restart_counter: Parent.RestartCounter.new(spec.restart)
+      restart_counter: RestartCounter.new(spec.restart)
     }
 
     state
@@ -74,10 +97,10 @@ defmodule Parent.State do
 
   @spec record_restart(t, filter) :: {:ok, t} | :error
   def record_restart(state, filter) do
-    case Parent.RestartCounter.record_restart(child!(state, filter).restart_counter) do
-      {:ok, counter} -> {:ok, update!(state, filter, &%{&1 | restart_counter: counter})}
-      :error -> :error
-    end
+    with {:ok, counter} <- RestartCounter.record_restart(state.restart_counter),
+         state = %{state | restart_counter: counter},
+         {:ok, counter} <- RestartCounter.record_restart(child!(state, filter).restart_counter),
+         do: {:ok, update!(state, filter, &%{&1 | restart_counter: counter})}
   end
 
   @spec pop(t, filter) :: {:ok, child, t} | :error
