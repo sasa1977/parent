@@ -1,22 +1,6 @@
 defmodule ParentTest do
   use ExUnit.Case, async: true
 
-  defmodule TestChild do
-    use GenServer
-    def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts || [])
-
-    @impl GenServer
-    def init(opts) do
-      if Keyword.get(opts, :trap_exit?), do: Process.flag(:trap_exit, true)
-      Keyword.get(opts, :init, &{:ok, &1}).(opts)
-    end
-
-    @impl GenServer
-    def terminate(_reason, opts) do
-      if Keyword.get(opts, :block_terminate?), do: Process.sleep(:infinity)
-    end
-  end
-
   setup do
     Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn ->
       :erlang.unique_integer([:monotonic, :positive]) * :timer.seconds(5)
@@ -67,9 +51,9 @@ defmodule ParentTest do
 
     test "succeeds if deps are started" do
       Parent.initialize()
-      start_child!(id: :child1)
-      start_child!(id: :child2)
-      assert {:ok, _pid} = start_child(binds_to: ~w/child1 child2/a)
+      TestChild.start!(id: :child1)
+      TestChild.start!(id: :child2)
+      assert {:ok, _pid} = TestChild.start(binds_to: ~w/child1 child2/a)
     end
 
     test "fails if the process fails to start" do
@@ -82,28 +66,28 @@ defmodule ParentTest do
 
     test "fails if the id is already taken" do
       Parent.initialize()
-      child = start_child!(id: :child)
-      assert start_child(id: :child) == {:error, {:already_started, child}}
+      child = TestChild.start!(id: :child)
+      assert TestChild.start(id: :child) == {:error, {:already_started, child}}
     end
 
     test "fails if deps are not started" do
       Parent.initialize()
-      start_child!(id: :child1)
-      start_child!(id: :child2)
+      TestChild.start!(id: :child1)
+      TestChild.start!(id: :child2)
 
-      assert {:error, error} = start_child(binds_to: ~w/child1 child2 child4 child5/a)
+      assert {:error, error} = TestChild.start(binds_to: ~w/child1 child2 child4 child5/a)
       assert error == {:missing_deps, ~w/child4 child5/a}
     end
 
     test "fails if the parent is not initialized" do
-      assert_raise RuntimeError, "Parent is not initialized", &start_child/0
+      assert_raise RuntimeError, "Parent is not initialized", &TestChild.start/0
     end
   end
 
   describe "shutdown_child/1" do
     test "stops the child synchronously, handling the exit message" do
       Parent.initialize()
-      child = start_child!(id: :child)
+      child = TestChild.start!(id: :child)
       Parent.shutdown_child(:child)
 
       refute Process.alive?(child)
@@ -114,7 +98,7 @@ defmodule ParentTest do
       Parent.initialize()
 
       child =
-        start_child!(
+        TestChild.start!(
           [id: :child, shutdown: :brutal_kill],
           block_terminate?: true,
           trap_exit?: true
@@ -129,7 +113,7 @@ defmodule ParentTest do
       Parent.initialize()
 
       child =
-        start_child!(
+        TestChild.start!(
           [id: :child, shutdown: 10],
           block_terminate?: true,
           trap_exit?: true
@@ -150,10 +134,10 @@ defmodule ParentTest do
 
     test "stops all dependencies in the opposite startup order" do
       Parent.initialize()
-      child1 = start_child!(id: :child1)
-      child2 = start_child!(id: :child2, binds_to: [:child1])
-      child3 = start_child!(id: :child3, binds_to: [:child2])
-      _child4 = start_child!(id: :child4)
+      child1 = TestChild.start!(id: :child1)
+      child2 = TestChild.start!(id: :child2, binds_to: [:child1])
+      child3 = TestChild.start!(id: :child3, binds_to: [:child2])
+      _child4 = TestChild.start!(id: :child4)
 
       Enum.each([child1, child2, child3], &Process.monitor/1)
       Parent.shutdown_child(:child1)
@@ -175,7 +159,7 @@ defmodule ParentTest do
   describe "restart_child" do
     test "restarts the process and returns the new pid" do
       Parent.initialize()
-      child = start_child!(id: :child)
+      child = TestChild.start!(id: :child)
       assert Parent.restart_child(:child) == %{also_restarted: [], also_terminated: []}
       {:ok, new_pid} = Parent.child_pid(:child)
       refute new_pid == child
@@ -189,7 +173,7 @@ defmodule ParentTest do
       fun = fn -> if :persistent_term.get(key), do: raise("error") end
       start = {Agent, :start_link, [fun]}
 
-      start_child!(id: :child, start: start)
+      TestChild.start!(id: :child, start: start)
 
       :persistent_term.put(key, true)
 
@@ -200,9 +184,9 @@ defmodule ParentTest do
 
     test "preserves startup order" do
       Parent.initialize()
-      child1 = start_child!(id: :child1)
-      _child2 = start_child!(id: :child2)
-      child3 = start_child!(id: :child3)
+      child1 = TestChild.start!(id: :child1)
+      _child2 = TestChild.start!(id: :child2)
+      child3 = TestChild.start!(id: :child3)
 
       Parent.restart_child(:child2)
       {:ok, child2} = Parent.child_pid(:child2)
@@ -212,10 +196,10 @@ defmodule ParentTest do
     test "also restarts non-temporary dependees" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1)
-      child2 = start_child!(id: :child2, binds_to: [:child1])
-      child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
-      child4 = start_child!(id: :child4)
+      child1 = TestChild.start!(id: :child1)
+      child2 = TestChild.start!(id: :child2, binds_to: [:child1])
+      child3 = TestChild.start!(id: :child3, restart: :temporary, binds_to: [:child2])
+      child4 = TestChild.start!(id: :child4)
 
       Process.monitor(child2)
       %{also_terminated: terminated, also_restarted: restarted} = Parent.restart_child(:child1)
@@ -241,7 +225,7 @@ defmodule ParentTest do
   describe "automatic child restart" do
     test "is performed when a permanent child terminates" do
       Parent.initialize()
-      pid1 = start_child!(id: :child, meta: :meta)
+      pid1 = TestChild.start!(id: :child, meta: :meta)
       restart_info = provoke_child_restart!(:child, restart: :shutdown)
 
       assert restart_info.id == :child
@@ -252,14 +236,14 @@ defmodule ParentTest do
 
     test "is performed when a transient child terminates abnormally" do
       Parent.initialize()
-      start_child!(id: :child, restart: :transient)
+      TestChild.start!(id: :child, restart: :transient)
       provoke_child_restart!(:child)
       assert Parent.child?(:child)
     end
 
     test "is performed when a child is terminated due to a timeout" do
       Parent.initialize()
-      start_child!(id: :child, timeout: 0)
+      TestChild.start!(id: :child, timeout: 0)
 
       assert {:child_restarted, restart_info} = handle_parent_message()
       assert restart_info.id == :child
@@ -269,14 +253,14 @@ defmodule ParentTest do
 
     test "is performed when :restart option is not provided" do
       Parent.initialize()
-      start_child!(id: :child)
+      TestChild.start!(id: :child)
       provoke_child_restart!(:child)
       assert Parent.child?(:child)
     end
 
     test "is not performed when a temporary child terminates" do
       Parent.initialize()
-      child = start_child!(id: :child, restart: :temporary)
+      child = TestChild.start!(id: :child, restart: :temporary)
       Process.exit(child, :kill)
 
       refute match?({:child_restarted, _restart_info}, handle_parent_message())
@@ -285,7 +269,7 @@ defmodule ParentTest do
 
     test "is not performed when a child is terminated via `Parent` function" do
       Parent.initialize()
-      start_child!(id: :child)
+      TestChild.start!(id: :child)
       Parent.shutdown_child(:child)
 
       refute_receive _
@@ -294,9 +278,9 @@ defmodule ParentTest do
 
     test "preserves startup order" do
       Parent.initialize()
-      start_child!(id: :child1)
-      start_child!(id: :child2)
-      start_child!(id: :child3)
+      TestChild.start!(id: :child1)
+      TestChild.start!(id: :child2)
+      TestChild.start!(id: :child3)
       provoke_child_restart!(:child2)
       assert Enum.map(Parent.children(), & &1.id) == [:child1, :child2, :child3]
     end
@@ -309,7 +293,7 @@ defmodule ParentTest do
       fun = fn -> if :persistent_term.get(key), do: raise("error") end
       start = {Agent, :start_link, [fun]}
 
-      {:ok, child} = start_child(id: :child, start: start)
+      child = TestChild.start!(id: :child, start: start)
 
       :persistent_term.put(key, true)
       Process.exit(child, :kill)
@@ -326,10 +310,10 @@ defmodule ParentTest do
     test "also restarts non-temporary dependees" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1)
-      child2 = start_child!(id: :child2, binds_to: [:child1])
-      child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
-      child4 = start_child!(id: :child4)
+      child1 = TestChild.start!(id: :child1)
+      child2 = TestChild.start!(id: :child2, binds_to: [:child1])
+      child3 = TestChild.start!(id: :child3, restart: :temporary, binds_to: [:child2])
+      child4 = TestChild.start!(id: :child4)
 
       Process.monitor(child2)
       restart_info = provoke_child_restart!(:child1)
@@ -350,9 +334,9 @@ defmodule ParentTest do
     test "takes down the entire parent on too many global restarts" do
       Parent.initialize(max_restarts: 2)
 
-      start_child!(id: :child1)
-      start_child!(id: :child2)
-      start_child!(id: :child3)
+      TestChild.start!(id: :child1)
+      TestChild.start!(id: :child2)
+      TestChild.start!(id: :child3)
 
       provoke_child_restart!(:child1)
       provoke_child_restart!(:child2)
@@ -365,9 +349,9 @@ defmodule ParentTest do
     test "default restart limit is 3 restarts in 5 seconds" do
       Parent.initialize(max_restarts: 2)
 
-      start_child!(id: :child1)
-      start_child!(id: :child2)
-      start_child!(id: :child3)
+      TestChild.start!(id: :child1)
+      TestChild.start!(id: :child2)
+      TestChild.start!(id: :child3)
 
       provoke_child_restart!(:child1)
       provoke_child_restart!(:child2)
@@ -381,9 +365,9 @@ defmodule ParentTest do
       assert log =~ "[error] Too many restarts in parent process"
       assert Parent.children() == []
 
-      start_child!(id: :child1)
-      start_child!(id: :child2)
-      start_child!(id: :child3)
+      TestChild.start!(id: :child1)
+      TestChild.start!(id: :child2)
+      TestChild.start!(id: :child3)
 
       provoke_child_restart!(:child1)
       provoke_child_restart!(:child2)
@@ -393,8 +377,8 @@ defmodule ParentTest do
     test "takes down the entire parent on too many restarts of a single child" do
       Parent.initialize(max_restarts: :infinity)
 
-      start_child!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 1})
-      start_child!(id: :child2)
+      TestChild.start!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 1})
+      TestChild.start!(id: :child2)
 
       provoke_child_restart!(:child1)
       provoke_child_restart!(:child1)
@@ -406,7 +390,7 @@ defmodule ParentTest do
 
     test "doesn't stop parent if max_restarts of the child is infinity" do
       Parent.initialize(max_restarts: :infinity)
-      start_child!(id: :child1, restart: {:permanent, max_restarts: :infinity})
+      TestChild.start!(id: :child1, restart: {:permanent, max_restarts: :infinity})
 
       provoke_child_restart!(:child1)
       provoke_child_restart!(:child1)
@@ -416,7 +400,7 @@ defmodule ParentTest do
 
     test "default max_restarts of a child is infinity" do
       Parent.initialize(max_restarts: :infinity)
-      start_child!(id: :child1)
+      TestChild.start!(id: :child1)
 
       provoke_child_restart!(:child1)
       provoke_child_restart!(:child1)
@@ -427,8 +411,8 @@ defmodule ParentTest do
     test "clears recorded restarts after the interval has passed" do
       Parent.initialize()
 
-      start_child!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 2})
-      start_child!(id: :child2)
+      TestChild.start!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 2})
+      TestChild.start!(id: :child2)
 
       provoke_child_restart!(:child1, at: :timer.seconds(0))
       provoke_child_restart!(:child1, at: :timer.seconds(1))
@@ -440,10 +424,10 @@ defmodule ParentTest do
     test "terminates all children in the opposite startup order" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1)
+      child1 = TestChild.start!(id: :child1)
       Process.monitor(child1)
 
-      child2 = start_child!(id: :child2)
+      child2 = TestChild.start!(id: :child2)
       Process.monitor(child2)
 
       Parent.shutdown_all()
@@ -464,7 +448,7 @@ defmodule ParentTest do
     test "waits for the child to stop" do
       Parent.initialize()
 
-      child = start_child!(id: :child, meta: :meta)
+      child = TestChild.start!(id: :child, meta: :meta)
 
       Task.start_link(fn ->
         Process.sleep(50)
@@ -477,7 +461,7 @@ defmodule ParentTest do
 
     test "returns timeout if the child didn't stop" do
       Parent.initialize()
-      child = start_child!(id: :child, meta: :meta)
+      child = TestChild.start!(id: :child, meta: :meta)
       assert Parent.await_child_termination(:child, 0) == :timeout
       assert Process.alive?(child)
     end
@@ -502,10 +486,10 @@ defmodule ParentTest do
       Parent.initialize()
       assert Parent.children() == []
 
-      child1 = start_child!(id: :child1, meta: :meta1)
+      child1 = TestChild.start!(id: :child1, meta: :meta1)
       assert Parent.children() == [%{id: :child1, pid: child1, meta: :meta1}]
 
-      child2 = start_child!(id: :child2, meta: :meta2)
+      child2 = TestChild.start!(id: :child2, meta: :meta2)
 
       assert Parent.children() == [
                %{id: :child1, pid: child1, meta: :meta1},
@@ -526,10 +510,10 @@ defmodule ParentTest do
       Parent.initialize()
       assert Parent.num_children() == 0
 
-      start_child!(id: :child1)
+      TestChild.start!(id: :child1)
       assert Parent.num_children() == 1
 
-      start_child!()
+      TestChild.start!()
       assert Parent.num_children() == 2
 
       Parent.shutdown_child(:child1)
@@ -548,8 +532,8 @@ defmodule ParentTest do
       refute Parent.child?(:child1)
       refute Parent.child?(:child2)
 
-      start_child!(id: :child1)
-      start_child!(id: :child2)
+      TestChild.start!(id: :child1)
+      TestChild.start!(id: :child2)
 
       assert Parent.child?(:child1)
       assert Parent.child?(:child2)
@@ -568,8 +552,8 @@ defmodule ParentTest do
     test "returns the pid of the given child, error otherwise" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1)
-      child2 = start_child!(id: :child2)
+      child1 = TestChild.start!(id: :child1)
+      child2 = TestChild.start!(id: :child2)
 
       assert Parent.child_pid(:child1) == {:ok, child1}
       assert Parent.child_pid(:child2) == {:ok, child2}
@@ -589,8 +573,8 @@ defmodule ParentTest do
     test "returns the id of the given child, error otherwise" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1)
-      child2 = start_child!(id: :child2)
+      child1 = TestChild.start!(id: :child1)
+      child2 = TestChild.start!(id: :child2)
 
       assert Parent.child_id(child1) == {:ok, :child1}
       assert Parent.child_id(child2) == {:ok, :child2}
@@ -610,8 +594,8 @@ defmodule ParentTest do
     test "returns the meta of the given child, error otherwise" do
       Parent.initialize()
 
-      start_child!(id: :child1, meta: :meta1)
-      start_child!(id: :child2, meta: :meta2)
+      TestChild.start!(id: :child1, meta: :meta1)
+      TestChild.start!(id: :child2, meta: :meta2)
 
       assert Parent.child_meta(:child1) == {:ok, :meta1}
       assert Parent.child_meta(:child2) == {:ok, :meta2}
@@ -631,8 +615,8 @@ defmodule ParentTest do
     test "updates meta of the known child, fails otherwise" do
       Parent.initialize()
 
-      start_child!(id: :child1, meta: 1)
-      start_child!(id: :child2, meta: 2)
+      TestChild.start!(id: :child1, meta: 1)
+      TestChild.start!(id: :child2, meta: 2)
 
       Parent.update_child_meta(:child2, &(&1 + 1))
 
@@ -653,7 +637,7 @@ defmodule ParentTest do
   describe "handle_message/1" do
     test "handles child termination" do
       Parent.initialize()
-      child = start_child!(id: :child, meta: :meta, restart: :temporary)
+      child = TestChild.start!(id: :child, meta: :meta, restart: :temporary)
       GenServer.stop(child)
 
       assert handle_parent_message() ==
@@ -669,10 +653,10 @@ defmodule ParentTest do
     test "terminates dependencies if a child stops" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1, restart: :temporary)
-      {:ok, child2} = start_child(id: :child2, restart: :temporary, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child2])
-      {:ok, _child4} = start_child(id: :child4, restart: :temporary)
+      {:ok, child1} = TestChild.start(id: :child1, restart: :temporary)
+      {:ok, child2} = TestChild.start(id: :child2, restart: :temporary, binds_to: [:child1])
+      {:ok, child3} = TestChild.start(id: :child3, restart: :temporary, binds_to: [:child2])
+      {:ok, _child4} = TestChild.start(id: :child4, restart: :temporary)
 
       Enum.each([child2, child3], &Process.monitor/1)
 
@@ -695,7 +679,7 @@ defmodule ParentTest do
 
     test "handles child timeout by stopping the child" do
       Parent.initialize()
-      child = start_child!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
+      child = TestChild.start!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
 
       assert handle_parent_message() ==
                {:child_terminated,
@@ -710,7 +694,7 @@ defmodule ParentTest do
     test "handles supervisor calls" do
       Parent.initialize()
       parent = self()
-      child = start_child!(id: :child)
+      child = TestChild.start!(id: :child)
 
       task =
         Task.async(fn ->
@@ -739,18 +723,56 @@ defmodule ParentTest do
     end
   end
 
-  defp start_child(overrides \\ [], child_opts \\ []) do
-    %{
-      id: :erlang.unique_integer([:positive, :monotonic]),
-      start: {TestChild, :start_link, [child_opts]}
-    }
-    |> Map.merge(Map.new(overrides))
-    |> Parent.start_child()
-  end
+  describe "whereis_child/2" do
+    test "finds registered children" do
+      Parent.initialize()
+      child1 = TestChild.start!(id: :child1, register?: true)
+      TestChild.start!(id: :child2)
+      TestChild.start!(id: :child3, register?: false)
 
-  defp start_child!(overrides \\ [], child_opts \\ []) do
-    {:ok, pid} = start_child(overrides, child_opts)
-    pid
+      assert Parent.whereis_child(self(), :child1) == child1
+      assert is_nil(Parent.whereis_child(self(), :child2))
+      assert is_nil(Parent.whereis_child(self(), :child3))
+    end
+
+    test "finds the child inside its parent" do
+      {parent1, [parent1_child]} = start_parent([[id: :child, register?: true]])
+      {parent2, [parent2_child]} = start_parent([[id: :child, register?: true]])
+
+      assert Parent.whereis_child(parent1, :child) == parent1_child
+      assert Parent.whereis_child(parent2, :child) == parent2_child
+    end
+
+    test "can dereference aliases" do
+      Parent.initialize()
+      child1 = TestChild.start!(id: :child1, register?: true)
+
+      registered_name = :"alias_#{System.unique_integer([:positive, :monotonic])}"
+      Process.register(self(), registered_name)
+      :global.register_name(registered_name, self())
+
+      assert Parent.whereis_child(registered_name, :child1) == child1
+      assert Parent.whereis_child({:global, registered_name}, :child1) == child1
+      assert Parent.whereis_child({:via, :global, registered_name}, :child1) == child1
+    end
+
+    test "removes registered child after it terminates" do
+      Parent.initialize()
+      TestChild.start!(id: :child, register?: true)
+      Parent.shutdown_child(:child)
+
+      assert is_nil(Parent.whereis_child(self(), :child))
+      assert :ets.tab2list(Parent.MetaRegistry.table!(self())) == []
+    end
+
+    test "removes registered children after the parent terminates" do
+      {parent, _children} = start_parent([[id: :child1], [id: :child2]])
+      Process.monitor(parent)
+      Process.exit(parent, :kill)
+      assert_receive {:DOWN, _mref, :process, ^parent, _}
+      assert is_nil(Parent.whereis_child(self(), :child1))
+      assert is_nil(Parent.whereis_child(self(), :child2))
+    end
   end
 
   defp handle_parent_message,
@@ -769,5 +791,30 @@ defmodule ParentTest do
     log = ExUnit.CaptureLog.capture_log(fn -> assert catch_exit(fun.()) == exit_reason end)
     assert_receive {:EXIT, _string_io_pid, :normal}
     log
+  end
+
+  defp start_parent(child_specs) do
+    test_pid = self()
+
+    parent_pid =
+      start_supervised!(
+        Supervisor.child_spec(
+          {Task,
+           fn ->
+             Parent.initialize()
+             children = Enum.map(child_specs, &TestChild.start!/1)
+             send(test_pid, children)
+
+             receive do
+               _ -> :ok
+             end
+           end},
+          id: make_ref()
+        )
+      )
+
+    assert_receive children
+
+    {parent_pid, children}
   end
 end

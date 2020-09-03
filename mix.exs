@@ -19,7 +19,8 @@ defmodule Parent.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      mod: {Parent.Application, []}
     ]
   end
 

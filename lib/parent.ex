@@ -33,7 +33,7 @@ defmodule Parent do
   """
   require Logger
 
-  alias Parent.State
+  alias Parent.{ChildRegistry, State}
 
   @type opts :: [option]
   @type option :: {:restart, restart_limit}
@@ -50,7 +50,8 @@ defmodule Parent do
           optional(:timeout) => pos_integer | :infinity,
           optional(:restart) => restart,
           optional(:binds_to) => [child_id],
-          optional(:max_restarts) => {limit :: pos_integer, interval :: pos_integer} | :infinity
+          optional(:max_restarts) => {limit :: pos_integer, interval :: pos_integer} | :infinity,
+          optional(:register?) => boolean
         }
 
   @type child_id :: term
@@ -115,6 +116,14 @@ defmodule Parent do
       {:ok, pid}
     end
   end
+
+  @doc """
+  Returns the pid of the child of the given parent, or nil if such child or parent doesn't exist.
+
+  This function can be invoked outside of the parent process.
+  """
+  @spec whereis_child(GenServer.server(), child_id) :: pid | nil
+  defdelegate whereis_child(parent, child_id), to: ChildRegistry, as: :whereis
 
   @doc """
   Restarts the child.
@@ -337,7 +346,8 @@ defmodule Parent do
       meta: nil,
       timeout: :infinity,
       restart: :permanent,
-      binds_to: []
+      binds_to: [],
+      register?: false
     }
   end
 
@@ -372,6 +382,8 @@ defmodule Parent do
           :infinity -> nil
           timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
         end
+
+      if child_spec.register?, do: ChildRegistry.register(pid, child_spec)
 
       {:ok, pid, timer_ref}
     end
@@ -514,6 +526,7 @@ defmodule Parent do
     exit_signal = if child.spec.shutdown == :brutal_kill, do: :kill, else: reason
     wait_time = if exit_signal == :kill, do: :infinity, else: child.spec.shutdown
     sync_stop_process(child.pid, exit_signal, wait_time)
+    if child.spec.register?, do: ChildRegistry.unregister(child.pid)
   end
 
   defp sync_stop_process(pid, exit_signal, wait_time) do
