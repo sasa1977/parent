@@ -51,11 +51,13 @@ defmodule Parent do
           optional(:restart) => restart,
           optional(:binds_to) => [child_id],
           optional(:max_restarts) => {limit :: pos_integer, interval :: pos_integer} | :infinity,
-          optional(:register?) => boolean
+          optional(:register?) => boolean,
+          optional(:roles) => [child_role]
         }
 
   @type child_id :: term
   @type child_meta :: term
+  @type child_role :: term
 
   @type start :: (() -> Supervisor.on_start_child()) | {module, atom, [term]}
 
@@ -120,10 +122,29 @@ defmodule Parent do
   @doc """
   Returns the pid of the child of the given parent, or nil if such child or parent doesn't exist.
 
+  This function can only find registered children, i.e. children which include `register?: true`
+  in their child spec.
+
   This function can be invoked outside of the parent process.
   """
   @spec whereis_child(GenServer.server(), child_id) :: pid | nil
-  defdelegate whereis_child(parent, child_id), to: ChildRegistry, as: :whereis
+  defdelegate whereis_child(parent, child_id), to: ChildRegistry
+
+  @doc false
+  def whereis_name({parent, child_id}) do
+    with nil <- whereis_child(parent, child_id), do: :undefined
+  end
+
+  @doc """
+  Returns all the pids of the children of the given parent who are in the given role.
+
+  This function can only find registered children, i.e. children which include `register?: true`
+  in their child spec.
+
+  This function can be invoked outside of the parent process.
+  """
+  @spec children_in_role(GenServer.server(), child_role) :: [pid]
+  defdelegate children_in_role(parent, child_role), to: ChildRegistry
 
   @doc """
   Restarts the child.
@@ -347,7 +368,8 @@ defmodule Parent do
       timeout: :infinity,
       restart: :permanent,
       binds_to: [],
-      register?: false
+      register?: false,
+      roles: []
     }
   end
 

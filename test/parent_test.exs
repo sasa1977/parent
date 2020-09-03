@@ -724,7 +724,7 @@ defmodule ParentTest do
   end
 
   describe "whereis_child/2" do
-    test "finds registered children" do
+    test "finds registered children by id" do
       Parent.initialize()
       child1 = TestChild.start!(id: :child1, register?: true)
       TestChild.start!(id: :child2)
@@ -733,6 +733,20 @@ defmodule ParentTest do
       assert Parent.whereis_child(self(), :child1) == child1
       assert is_nil(Parent.whereis_child(self(), :child2))
       assert is_nil(Parent.whereis_child(self(), :child3))
+
+      assert GenServer.whereis({:via, Parent, {self(), :child1}}) == child1
+      assert is_nil(GenServer.whereis({:via, Parent, {self(), :child2}}))
+    end
+
+    test "finds registered children by roles" do
+      Parent.initialize()
+      child1 = TestChild.start!(register?: true, roles: [:foo, :bar])
+      child2 = TestChild.start!(register?: true, roles: [:foo])
+      TestChild.start!(register?: true, roles: [])
+      TestChild.start!()
+
+      assert Parent.children_in_role(self(), :foo) == [child1, child2]
+      assert Parent.children_in_role(self(), :bar) == [child1]
     end
 
     test "finds the child inside its parent" do
@@ -758,7 +772,7 @@ defmodule ParentTest do
 
     test "removes registered child after it terminates" do
       Parent.initialize()
-      TestChild.start!(id: :child, register?: true)
+      TestChild.start!(id: :child, roles: [:foo, :bar], register?: true)
       Parent.shutdown_child(:child)
 
       assert is_nil(Parent.whereis_child(self(), :child))
