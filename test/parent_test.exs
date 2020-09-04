@@ -160,7 +160,7 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child)
 
-      assert Map.delete(Parent.shutdown_child(:child), :resurrection_info) ==
+      assert Map.delete(Parent.shutdown_child(:child), :return_info) ==
                %{terminated_children: [:child]}
 
       refute Process.alive?(child)
@@ -675,7 +675,7 @@ defmodule ParentTest do
 
       assert {:child_terminated, info} = handle_parent_message()
 
-      assert Map.delete(info, :resurrection_info) == %{
+      assert Map.delete(info, :return_info) == %{
                id: :child,
                meta: :meta,
                pid: child,
@@ -722,7 +722,7 @@ defmodule ParentTest do
 
       assert {:child_terminated, info} = handle_parent_message()
 
-      assert Map.delete(info, :resurrection_info) == %{
+      assert Map.delete(info, :return_info) == %{
                id: :child,
                meta: :meta,
                pid: child,
@@ -840,8 +840,8 @@ defmodule ParentTest do
       start_child!(id: :child1)
       child2 = start_child!(id: :child2)
       start_child!(id: :child3, binds_to: [:child1])
-      resurrection_info = Parent.shutdown_child(:child1).resurrection_info
-      Parent.resurrect(resurrection_info)
+      return_info = Parent.shutdown_child(:child1).return_info
+      Parent.return_children(return_info)
 
       assert [
                %{id: :child1, pid: child1},
@@ -868,14 +868,14 @@ defmodule ParentTest do
       start_child!(id: :child2)
       start_child!(id: :child3, shutdown_group: :group1, restart: {:temporary, max_restarts: 1})
 
-      resurrection_info = provoke_child_termination!(:child3, at: 0).resurrection_info
-      Parent.resurrect(resurrection_info)
+      return_info = provoke_child_termination!(:child3, at: 0).return_info
+      Parent.return_children(return_info)
 
-      resurrection_info = provoke_child_termination!(:child3, at: 0).resurrection_info
+      return_info = provoke_child_termination!(:child3, at: 0).return_info
 
       log =
         assert_parent_exit(
-          fn -> Parent.resurrect(resurrection_info) end,
+          fn -> Parent.return_children(return_info) end,
           :too_many_restarts
         )
 

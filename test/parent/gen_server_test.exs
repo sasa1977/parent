@@ -103,7 +103,7 @@ defmodule Parent.GenServerTest do
     assert_receive {:trace, ^parent, :call,
                     {Parent.TestServer, :handle_child_terminated, [info, :initial_state]}}
 
-    assert Map.delete(info, :resurrection_info) == %{
+    assert Map.delete(info, :return_info) == %{
              id: child_id,
              pid: child_pid,
              meta: :meta,

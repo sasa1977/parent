@@ -79,7 +79,7 @@ defmodule Parent do
           meta: child_meta,
           reason: term,
           also_terminated: [%{id: child_id, pid: pid, meta: child_meta}],
-          resurrection_info: resurrection_info
+          return_info: return_info
         }
 
   @type child_restart_info :: %{
@@ -88,7 +88,7 @@ defmodule Parent do
           also_restarted: [child_id]
         }
 
-  @opaque resurrection_info :: %{restart: [State.child()], record_restart: State.child() | nil}
+  @opaque return_info :: [restart: [State.child()], record_restart: State.child() | nil]
 
   @doc """
   Initializes the state of the parent process.
@@ -197,20 +197,22 @@ defmodule Parent do
 
       {:ok, children, state} ->
         children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
-        state = restart_children(state, children)
-        store(state)
+
+        state
+        |> return_children(restart: children)
+        |> store()
     end
   end
 
   @doc """
-  Resurrects terminated processes.
+  Starts new instances of terminated children.
 
-  The children's startup/shutdown position are restored.
+  The children's startup position will be restored.
   """
-  @spec resurrect(resurrection_info) :: :ok
-  def resurrect(resurrection_info) do
+  @spec return_children(return_info) :: :ok
+  def return_children(return_info) do
     state()
-    |> resurrect_children(resurrection_info)
+    |> return_children(return_info)
     |> store()
   end
 
@@ -225,7 +227,7 @@ defmodule Parent do
   """
   @spec shutdown_child(child_id) :: %{
           terminated_children: [child_id],
-          resurrection_info: resurrection_info
+          return_info: return_info
         }
   def shutdown_child(child_id) do
     case State.pop_child_with_bound_siblings(state(), id: child_id) do
@@ -238,7 +240,7 @@ defmodule Parent do
 
         %{
           terminated_children: Enum.map(children, & &1.spec.id),
-          resurrection_info: %{record_restart: nil, restart: children}
+          return_info: [restart: children]
         }
     end
   end
@@ -456,8 +458,8 @@ defmodule Parent do
     handle_child_down(state, child, :timeout)
   end
 
-  defp do_handle_message(state, {__MODULE__, :resume_restart, resurrection_info}),
-    do: {:ignore, resurrect_children(state, resurrection_info)}
+  defp do_handle_message(state, {__MODULE__, :resume_restart, return_info}),
+    do: {:ignore, return_children(state, return_info)}
 
   defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
     GenServer.reply(client, supervisor_which_children())
@@ -477,9 +479,7 @@ defmodule Parent do
     Enum.each(Enum.reverse(bound_siblings), &stop_child(&1, :shutdown))
 
     if requires_restart?(child, reason) do
-      {child, state} = record_restart!(state, child)
-      state = restart_children(state, [child | bound_siblings])
-      {:ignore, state}
+      {:ignore, return_children(state, restart: bound_siblings, record_restart: child)}
     else
       info = %{
         id: child.spec.id,
@@ -487,41 +487,38 @@ defmodule Parent do
         meta: child.spec.meta,
         reason: reason,
         also_terminated: Enum.map(bound_siblings, &terminated_info/1),
-        resurrection_info: %{record_restart: child, restart: bound_siblings}
+        return_info: [restart: bound_siblings, record_restart: child]
       }
 
       {{:child_terminated, info}, state}
     end
   end
 
-  defp resurrect_children(state, resurrection_info) do
+  defp requires_restart?(%{spec: %{restart: {:temporary, _opts}}}, _reason), do: false
+  defp requires_restart?(%{spec: %{restart: {:permanent, _opts}}}, _reason), do: true
+  defp requires_restart?(%{spec: %{restart: {:transient, _opts}}}, reason), do: reason != :normal
+
+  defp return_children(state, return_info) do
     {record_restart, state} =
-      case resurrection_info.record_restart do
+      case Keyword.get(return_info, :record_restart) do
         nil -> {nil, state}
         child -> record_restart!(state, child)
       end
 
-    children = Enum.concat(resurrection_info.restart, Enum.reject([record_restart], &is_nil/1))
-    restart_children(state, children)
-  end
+    children =
+      return_info
+      |> Keyword.fetch!(:restart)
+      |> Stream.concat([record_restart])
+      |> Enum.reject(&is_nil/1)
 
-  defp restart_children(state, children) do
-    {not_started, state} = do_restart_children(state, Enum.sort_by(children, & &1.startup_index))
+    {not_started, state} =
+      return_children_while_ok(state, Enum.sort_by(children, & &1.startup_index))
 
     with [child | children] <- not_started do
-      send(self(), {__MODULE__, :resume_restart, %{record_restart: child, restart: children}})
+      send(self(), {__MODULE__, :resume_restart, [record_restart: child, restart: children]})
     end
 
     state
-  end
-
-  defp do_restart_children(state, []), do: {[], state}
-
-  defp do_restart_children(state, [child | children]) do
-    case restart_child(state, child) do
-      {:ok, state} -> do_restart_children(state, children)
-      {:error, _reason} -> {[child | children], state}
-    end
   end
 
   defp record_restart!(state, child) do
@@ -534,20 +531,16 @@ defmodule Parent do
     end
   end
 
-  defp give_up!(state, exit, error) do
-    Logger.error(error)
-    store(state)
-    shutdown_all()
-    exit(exit)
+  defp return_children_while_ok(state, []), do: {[], state}
+
+  defp return_children_while_ok(state, [child | children]) do
+    case return_child(state, child) do
+      {:ok, state} -> return_children_while_ok(state, children)
+      {:error, _reason} -> {[child | children], state}
+    end
   end
 
-  defp requires_restart?(%{spec: %{restart: {:temporary, _opts}}}, _reason), do: false
-  defp requires_restart?(%{spec: %{restart: {:permanent, _opts}}}, _reason), do: true
-  defp requires_restart?(%{spec: %{restart: {:transient, _opts}}}, reason), do: reason != :normal
-
-  defp terminated_info(child), do: %{id: child.spec.id, pid: child.pid, meta: child.spec.meta}
-
-  defp restart_child(state, child) do
+  defp return_child(state, child) do
     case start_child_process(state, child.spec) do
       {:ok, new_pid, timer_ref} ->
         {:ok, State.reregister_child(state, child, new_pid, timer_ref)}
@@ -559,6 +552,15 @@ defmodule Parent do
         error
     end
   end
+
+  defp give_up!(state, exit, error) do
+    Logger.error(error)
+    store(state)
+    shutdown_all()
+    exit(exit)
+  end
+
+  defp terminated_info(child), do: %{id: child.spec.id, pid: child.pid, meta: child.spec.meta}
 
   defp stop_child(child, reason) do
     kill_timer(child.timer_ref, child.pid)
