@@ -160,7 +160,7 @@ defmodule ParentTest do
     test "restarts the process and returns the new pid" do
       Parent.initialize()
       child = TestChild.start!(id: :child)
-      assert Parent.restart_child(:child) == %{also_restarted: [], also_terminated: []}
+      assert Parent.restart_child(:child) == :ok
       {:ok, new_pid} = Parent.child_pid(:child)
       refute new_pid == child
     end
@@ -193,7 +193,7 @@ defmodule ParentTest do
       assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
 
-    test "also restarts non-temporary dependees" do
+    test "also restarts bound siblings" do
       Parent.initialize()
 
       child1 = TestChild.start!(id: :child1)
@@ -202,19 +202,18 @@ defmodule ParentTest do
       child4 = TestChild.start!(id: :child4)
 
       Process.monitor(child2)
-      %{also_terminated: terminated, also_restarted: restarted} = Parent.restart_child(:child1)
-
-      assert terminated == [%{id: :child3, meta: nil, pid: child3}]
-      assert restarted == [:child2]
+      Parent.restart_child(:child1)
 
       assert [
                %{id: :child1, meta: nil, pid: new_child1},
                %{id: :child2, meta: nil, pid: new_child2},
+               %{id: :child3, meta: nil, pid: new_child3},
                %{id: :child4, meta: nil, pid: ^child4}
              ] = Parent.children()
 
       refute new_child1 == child1
       refute new_child2 == child2
+      refute new_child3 == child3
     end
 
     test "fails if the parent is not initialized" do
@@ -307,7 +306,7 @@ defmodule ParentTest do
       assert Parent.children() == []
     end
 
-    test "also restarts non-temporary dependees" do
+    test "also restarts bound siblings" do
       Parent.initialize()
 
       child1 = TestChild.start!(id: :child1)
@@ -318,17 +317,18 @@ defmodule ParentTest do
       Process.monitor(child2)
       restart_info = provoke_child_restart!(:child1)
 
-      assert restart_info.also_restarted == [:child2]
-      assert restart_info.also_terminated == [%{id: :child3, meta: nil, pid: child3}]
+      assert restart_info.also_restarted == [:child2, :child3]
 
       assert [
                %{id: :child1, meta: nil, pid: new_child1},
                %{id: :child2, meta: nil, pid: new_child2},
+               %{id: :child3, meta: nil, pid: new_child3},
                %{id: :child4, meta: nil, pid: ^child4}
              ] = Parent.children()
 
       refute new_child1 == child1
       refute new_child2 == child2
+      refute new_child3 == child3
     end
 
     test "takes down the entire parent on too many global restarts" do

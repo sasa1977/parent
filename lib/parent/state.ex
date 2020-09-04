@@ -89,16 +89,31 @@ defmodule Parent.State do
     |> Enum.sort_by(& &1.startup_index)
   end
 
-  @spec record_restart(t, filter) :: {:ok, t} | :error
-  def record_restart(state, filter) do
+  @spec record_restart(t) :: {:ok, t} | :error
+  def record_restart(state) do
     with {:ok, counter} <- RestartCounter.record_restart(state.restart_counter),
-         state = %{state | restart_counter: counter},
-         {:ok, counter} <- RestartCounter.record_restart(child!(state, filter).restart_counter),
-         do: {:ok, update!(state, filter, &%{&1 | restart_counter: counter})}
+         do: {:ok, %{state | restart_counter: counter}}
   end
 
-  @spec pop(t, filter) :: {:ok, child, t} | :error
-  def pop(state, filter) do
+  @spec pop_child_with_bound_siblings(t, filter) :: {:ok, [child], t} | :error
+  def pop_child_with_bound_siblings(state, filter) do
+    with {:ok, child} <- child(state, filter) do
+      {children, state} =
+        List.foldr(
+          [child | bound_siblings(state, child)],
+          {[], state},
+          fn child, {children, state} ->
+            {:ok, _child, state} = pop_child(state, pid: child.pid)
+            {[child | children], state}
+          end
+        )
+
+      {:ok, children, state}
+    end
+  end
+
+  @spec pop_child(t, filter) :: {:ok, child, t} | :error
+  def pop_child(state, filter) do
     with {:ok, child} <- child(state, filter) do
       state =
         Enum.reduce(
@@ -185,5 +200,11 @@ defmodule Parent.State do
       )
 
     {dependencies, state}
+  end
+
+  defp bound_siblings(state, child) do
+    child.bound_siblings
+    |> Stream.map(&child!(state, id: &1))
+    |> Enum.sort_by(& &1.startup_index)
   end
 end

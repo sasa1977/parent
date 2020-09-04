@@ -83,8 +83,7 @@ defmodule Parent do
   @type child_restart_info :: %{
           id: child_id,
           reason: term,
-          also_restarted: [child_id],
-          also_terminated: [also_terminated]
+          also_restarted: [child_id]
         }
 
   @doc """
@@ -155,23 +154,16 @@ defmodule Parent do
   If any child fails to restart, all of the children will be taken down and the parent process
   will exit.
   """
-  @spec restart_child(child_id) :: %{
-          also_terminated: [also_terminated],
-          also_restarted: [child_id]
-        }
+  @spec restart_child(child_id) :: :ok
   def restart_child(child_id) do
-    state = state()
-
-    case State.child(state, id: child_id) do
+    case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
         raise "trying to terminate an unknown child"
 
-      {:ok, child} ->
-        bound_siblings = bound_siblings(state, child)
-        state = stop_child(state, child, :shutdown)
-        {info, state} = restart_child_and_bound_siblings(state, child, bound_siblings)
+      {:ok, children, state} ->
+        children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
+        state = Enum.reduce(children, state, &restart_child!(&2, &1))
         store(state)
-        info
     end
   end
 
@@ -186,16 +178,13 @@ defmodule Parent do
   """
   @spec shutdown_child(child_id) :: :ok
   def shutdown_child(child_id) do
-    state = state()
-
-    case State.child(state, id: child_id) do
+    case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
         raise "trying to terminate an unknown child"
 
-      {:ok, child} ->
-        state
-        |> stop_child(child, :shutdown)
-        |> store()
+      {:ok, children, state} ->
+        children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
+        store(state)
     end
   end
 
@@ -208,7 +197,12 @@ defmodule Parent do
   @spec shutdown_all(term) :: :ok
   def shutdown_all(reason \\ :shutdown) do
     reason = with :normal <- reason, do: :shutdown
-    stop_children(state(), Enum.reverse(State.children(state())), reason)
+
+    state()
+    |> State.children()
+    |> Enum.reverse()
+    |> Enum.each(&stop_child(&1, reason))
+
     # initializing the state to reset the startup index
     store(State.reinitialize(state()))
   end
@@ -249,7 +243,7 @@ defmodule Parent do
   def await_child_termination(child_id, timeout) do
     state = state()
 
-    case State.pop(state, id: child_id) do
+    case State.pop_child(state, id: child_id) do
       :error ->
         raise "unknown child"
 
@@ -434,7 +428,7 @@ defmodule Parent do
 
   defp do_handle_message(state, {__MODULE__, :child_timeout, pid}) do
     child = State.child!(state, pid: pid)
-    remove_child(child, :kill)
+    stop_child(child, :kill)
     handle_child_down(state, child, :timeout)
   end
 
@@ -451,18 +445,22 @@ defmodule Parent do
   defp do_handle_message(_state, _other), do: nil
 
   defp handle_child_down(state, child, reason) do
-    bound_siblings = bound_siblings(state, child)
-    state = stop_children(state, Enum.reverse(bound_siblings), :shutdown)
+    {:ok, children, state} = State.pop_child_with_bound_siblings(state, pid: child.pid)
+    [child | bound_siblings] = children
+    Enum.each(Enum.reverse(bound_siblings), &stop_child(&1, :shutdown))
 
     if requires_restart?(child, reason) do
-      state = record_restart!(state, child)
-      {:ok, child, state} = State.pop(state, pid: child.pid)
-      {info, state} = restart_child_and_bound_siblings(state, child, bound_siblings)
-      info = Map.merge(info, %{id: child.spec.id, reason: reason})
+      {child, state} = record_restart!(state, child)
+      state = Enum.reduce([child | bound_siblings], state, &restart_child!(&2, &1))
+
+      info = %{
+        id: child.spec.id,
+        reason: reason,
+        also_restarted: Enum.map(bound_siblings, & &1.spec.id)
+      }
+
       {{:child_restarted, info}, state}
     else
-      {:ok, _child, state} = State.pop(state, pid: child.pid)
-
       info = %{
         id: child.spec.id,
         pid: child.pid,
@@ -476,14 +474,12 @@ defmodule Parent do
   end
 
   defp record_restart!(state, child) do
-    case State.record_restart(state, pid: child.pid) do
-      {:ok, state} ->
-        state
-
-      :error ->
-        {:ok, _child, state} = State.pop(state, id: child.spec.id)
-        error = "Too many restarts in parent process."
-        give_up!(state, :too_many_restarts, error)
+    with {:ok, state} <- State.record_restart(state),
+         {:ok, restart_counter} <- Parent.RestartCounter.record_restart(child.restart_counter) do
+      {%{child | restart_counter: restart_counter}, state}
+    else
+      _ ->
+        give_up!(state, :too_many_restarts, "Too many restarts in parent process.")
     end
   end
 
@@ -498,18 +494,6 @@ defmodule Parent do
   defp requires_restart?(%{spec: %{restart: {:permanent, _opts}}}, _reason), do: true
   defp requires_restart?(%{spec: %{restart: {:transient, _opts}}}, reason), do: reason != :normal
 
-  defp restart_child_and_bound_siblings(state, child, bound_siblings) do
-    {terminated, restarted} = Enum.split_with(bound_siblings, &(&1.spec.restart == :temporary))
-    state = Enum.reduce([child | restarted], state, &restart_child!(&2, &1))
-
-    info = %{
-      also_terminated: Enum.map(terminated, &terminated_info/1),
-      also_restarted: Enum.map(restarted, & &1.spec.id)
-    }
-
-    {info, state}
-  end
-
   defp terminated_info(child), do: %{id: child.spec.id, pid: child.pid, meta: child.spec.meta}
 
   defp restart_child!(state, child) do
@@ -523,27 +507,7 @@ defmodule Parent do
     end
   end
 
-  defp stop_children(state, children, reason) do
-    Enum.reduce(
-      children,
-      state,
-      &stop_child(&2, State.child!(&2, id: &1.spec.id), reason)
-    )
-  end
-
-  defp stop_child(state, child, reason) do
-    List.foldr(
-      [child | bound_siblings(state, child)],
-      state,
-      fn child, state ->
-        {:ok, _child, state} = State.pop(state, pid: child.pid)
-        remove_child(child, reason)
-        state
-      end
-    )
-  end
-
-  defp remove_child(child, reason) do
+  defp stop_child(child, reason) do
     kill_timer(child.timer_ref, child.pid)
     exit_signal = if child.spec.shutdown == :brutal_kill, do: :kill, else: reason
     wait_time = if exit_signal == :kill, do: :infinity, else: child.spec.shutdown
@@ -576,12 +540,6 @@ defmodule Parent do
     after
       0 -> :ok
     end
-  end
-
-  defp bound_siblings(state, child) do
-    child.bound_siblings
-    |> Stream.map(&State.child!(state, id: &1))
-    |> Enum.sort_by(& &1.startup_index)
   end
 
   @spec state() :: State.t()
