@@ -88,8 +88,7 @@ defmodule ParentTest do
     test "stops the child synchronously, handling the exit message" do
       Parent.initialize()
       child = TestChild.start!(id: :child)
-      Parent.shutdown_child(:child)
-
+      assert Parent.shutdown_child(:child) == [:child]
       refute Process.alive?(child)
       refute_receive {:EXIT, ^child, _reason}
     end
@@ -140,7 +139,7 @@ defmodule ParentTest do
       _child4 = TestChild.start!(id: :child4)
 
       Enum.each([child1, child2, child3], &Process.monitor/1)
-      Parent.shutdown_child(:child1)
+      assert Parent.shutdown_child(:child1) == [:child1, :child2, :child3]
 
       assert [%{id: :child4}] = Parent.children()
 
@@ -160,7 +159,7 @@ defmodule ParentTest do
     test "restarts the process and returns the new pid" do
       Parent.initialize()
       child = TestChild.start!(id: :child)
-      assert Parent.restart_child(:child) == :ok
+      assert Parent.restart_child(:child) == [:child]
       {:ok, new_pid} = Parent.child_pid(:child)
       refute new_pid == child
     end
@@ -202,7 +201,7 @@ defmodule ParentTest do
       child4 = TestChild.start!(id: :child4)
 
       Process.monitor(child2)
-      Parent.restart_child(:child1)
+      assert Parent.restart_child(:child1) == [:child1, :child2, :child3]
 
       assert [
                %{id: :child1, meta: nil, pid: new_child1},

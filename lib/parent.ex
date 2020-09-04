@@ -154,7 +154,7 @@ defmodule Parent do
   If any child fails to restart, all of the children will be taken down and the parent process
   will exit.
   """
-  @spec restart_child(child_id) :: :ok
+  @spec restart_child(child_id) :: restarted_children :: [child_id]
   def restart_child(child_id) do
     case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
@@ -164,6 +164,7 @@ defmodule Parent do
         children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
         state = Enum.reduce(children, state, &restart_child!(&2, &1))
         store(state)
+        Enum.map(children, & &1.spec.id)
     end
   end
 
@@ -176,7 +177,7 @@ defmodule Parent do
   Permanent and transient children won't be restarted, and their specifications won't be preserved.
   In other words, this function completely removes the child and all other children bound to it.
   """
-  @spec shutdown_child(child_id) :: :ok
+  @spec shutdown_child(child_id) :: terminated_children :: [child_id]
   def shutdown_child(child_id) do
     case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
@@ -185,6 +186,7 @@ defmodule Parent do
       {:ok, children, state} ->
         children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
         store(state)
+        Enum.map(children, & &1.spec.id)
     end
   end
 
