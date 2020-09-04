@@ -36,10 +36,12 @@ defmodule Parent do
   alias Parent.{ChildRegistry, State}
 
   @type opts :: [option]
-  @type option :: {:restart, restart_limit}
-  @type restart :: restart_strategy | {restart_strategy, restart_limit}
+  @type option :: restart_limit
+  @type restart :: restart_strategy | {restart_strategy, [restart_limit]}
   @type restart_strategy :: :temporary | :permanent | :transient
-  @type restart_limit :: [max_restarts: non_neg_integer | :infinity, max_seconds: pos_integer]
+  @type restart_limit ::
+          {:max_restarts, non_neg_integer | :infinity}
+          | {:max_seconds, pos_integer}
 
   @type child_spec :: %{
           :id => child_id,
@@ -51,7 +53,6 @@ defmodule Parent do
           optional(:timeout) => pos_integer | :infinity,
           optional(:restart) => restart,
           optional(:binds_to) => [child_id],
-          optional(:max_restarts) => {limit :: pos_integer, interval :: pos_integer} | :infinity,
           optional(:register?) => boolean,
           optional(:roles) => [child_role],
           optional(:shutdown_group) => shutdown_group
@@ -70,7 +71,6 @@ defmodule Parent do
 
   @type handle_message_response ::
           {:child_terminated, child_termination_info}
-          | {:child_restarted, child_restart_info}
           | :ignore
 
   @type child_termination_info :: %{
@@ -189,7 +189,7 @@ defmodule Parent do
   If any child fails to restart, all of the children will be taken down and the parent process
   will exit.
   """
-  @spec restart_child(child_id) :: restarted_children :: [child_id]
+  @spec restart_child(child_id) :: restarted_children :: :ok
   def restart_child(child_id) do
     case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
@@ -197,32 +197,20 @@ defmodule Parent do
 
       {:ok, children, state} ->
         children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
-        state = Enum.reduce(children, state, &restart_child!(&2, &1))
+        state = restart_children(state, children)
         store(state)
-        Enum.map(children, & &1.spec.id)
     end
   end
 
   @doc """
-  Resurrects the terminated child and its bound siblings.
-
-  If the child was not taken down explicitly via `shutdown_child/1`, and the restart limit has
-  been exceeded, the parent process will terminate.
+  Resurrects terminated processes.
 
   The children's startup/shutdown position are restored.
   """
-  @spec resurrect_child(resurrection_info) :: :ok
-  def resurrect_child(resurrection_info) do
-    {record_restart, state} =
-      case resurrection_info.record_restart do
-        nil -> {nil, state()}
-        child -> record_restart!(state(), child)
-      end
-
-    resurrection_info.restart
-    |> Stream.concat(Enum.reject([record_restart], &is_nil/1))
-    |> Enum.sort_by(& &1.startup_index)
-    |> Enum.reduce(state, &restart_child!(&2, &1))
+  @spec resurrect(resurrection_info) :: :ok
+  def resurrect(resurrection_info) do
+    state()
+    |> resurrect_children(resurrection_info)
     |> store()
   end
 
@@ -279,16 +267,12 @@ defmodule Parent do
 
   If the given message is not handled, this function returns `nil`. In such cases, the client code
   should perform standard message handling. Otherwise, the message has been handled by the parent,
-  and the client code doesn't shouldn't treat this message as a standard message (e.g. by calling
+  and the client code shouldn't treat this message as a standard message (e.g. by calling
   `handle_info` of the callback module).
 
-  However, in some cases, a client might want to do some special processing, so the return value
-  will contain information which might be of interest to the client. Possible values are:
-
-    - `{:child_terminated, info}` - a child process has terminated
-    - `{:child_restarted, info}` - `Parent` handled this message, but there's no useful information to return
-
-  See `t:handle_message_response/0` for detailed type specification of each message.
+  If `:ignore` is returned, the message has been processed, and the client code should ignore it.
+  Finally, if the return value is `{:child_terminated, info}`, it indicates that a child process
+  has terminated. A client may do some extra processing in this case.
 
   Note that you don't need to invoke this function in a `Parent.GenServer` callback module.
   """
@@ -472,6 +456,9 @@ defmodule Parent do
     handle_child_down(state, child, :timeout)
   end
 
+  defp do_handle_message(state, {__MODULE__, :resume_restart, resurrection_info}),
+    do: {:ignore, resurrect_children(state, resurrection_info)}
+
   defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
     GenServer.reply(client, supervisor_which_children())
     {:ignore, state}
@@ -491,19 +478,8 @@ defmodule Parent do
 
     if requires_restart?(child, reason) do
       {child, state} = record_restart!(state, child)
-
-      state =
-        [child | bound_siblings]
-        |> Enum.sort_by(& &1.startup_index)
-        |> Enum.reduce(state, &restart_child!(&2, &1))
-
-      info = %{
-        id: child.spec.id,
-        reason: reason,
-        also_restarted: Enum.map(bound_siblings, & &1.spec.id)
-      }
-
-      {{:child_restarted, info}, state}
+      state = restart_children(state, [child | bound_siblings])
+      {:ignore, state}
     else
       info = %{
         id: child.spec.id,
@@ -515,6 +491,36 @@ defmodule Parent do
       }
 
       {{:child_terminated, info}, state}
+    end
+  end
+
+  defp resurrect_children(state, resurrection_info) do
+    {record_restart, state} =
+      case resurrection_info.record_restart do
+        nil -> {nil, state}
+        child -> record_restart!(state, child)
+      end
+
+    children = Enum.concat(resurrection_info.restart, Enum.reject([record_restart], &is_nil/1))
+    restart_children(state, children)
+  end
+
+  defp restart_children(state, children) do
+    {not_started, state} = do_restart_children(state, Enum.sort_by(children, & &1.startup_index))
+
+    with [child | children] <- not_started do
+      send(self(), {__MODULE__, :resume_restart, %{record_restart: child, restart: children}})
+    end
+
+    state
+  end
+
+  defp do_restart_children(state, []), do: {[], state}
+
+  defp do_restart_children(state, [child | children]) do
+    case restart_child(state, child) do
+      {:ok, state} -> do_restart_children(state, children)
+      {:error, _reason} -> {[child | children], state}
     end
   end
 
@@ -541,17 +547,16 @@ defmodule Parent do
 
   defp terminated_info(child), do: %{id: child.spec.id, pid: child.pid, meta: child.spec.meta}
 
-  defp restart_child!(state, child) do
+  defp restart_child(state, child) do
     case start_child_process(state, child.spec) do
       {:ok, new_pid, timer_ref} ->
-        State.reregister_child(state, child, new_pid, timer_ref)
+        {:ok, State.reregister_child(state, child, new_pid, timer_ref)}
 
       :ignore ->
-        state
+        {:ok, state}
 
       error ->
-        error = "Failed to restart child #{inspect(child.spec.id)}: #{inspect(error)}."
-        give_up!(state, :restart_error, error)
+        error
     end
   end
 

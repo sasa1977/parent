@@ -161,20 +161,6 @@ defmodule Parent.GenServer do
               | {:stop, reason :: term, new_state}
             when new_state: state
 
-  @doc """
-  Invoked when a child is restarted.
-
-  This callback will not be invoked in the following cases:
-
-    - a child is restarted via `Parent.restart_child/1`
-    - a child is implicitly restarted by `Parent` because its dependency was restarted
-  """
-  @callback handle_child_restarted(info :: Parent.child_restart_info(), state) ::
-              {:noreply, new_state}
-              | {:noreply, new_state, timeout | :hibernate}
-              | {:stop, reason :: term, new_state}
-            when new_state: state
-
   @doc "Starts the parent process."
   @spec start_link(module, arg :: term, [Parent.option() | GenServer.option()]) ::
           GenServer.on_start()
@@ -228,9 +214,6 @@ defmodule Parent.GenServer do
     case Parent.handle_message(message) do
       {:child_terminated, info} ->
         invoke_callback(:handle_child_terminated, [info, state])
-
-      {:child_restarted, info} ->
-        invoke_callback(:handle_child_restarted, [info, state])
 
       :ignore ->
         {:noreply, state}
@@ -311,10 +294,7 @@ defmodule Parent.GenServer do
       @impl behaviour
       def handle_child_terminated(_info, state), do: {:noreply, state}
 
-      @impl behaviour
-      def handle_child_restarted(_info, state), do: {:noreply, state}
-
-      defoverridable handle_child_terminated: 2, handle_child_restarted: 2, child_spec: 1
+      defoverridable handle_child_terminated: 2, child_spec: 1
     end
   end
 end

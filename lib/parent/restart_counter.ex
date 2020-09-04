@@ -14,7 +14,7 @@ defmodule Parent.RestartCounter do
                    do: __MODULE__.TimeProvider.Test,
                    else: __MODULE__.TimeProvider.Monotonic
 
-  @spec new(Parent.restart() | Parent.restart_limit()) :: t
+  @spec new(Parent.restart() | [Parent.restart_limit()]) :: t
   def new({_type, opts}), do: new(opts)
 
   def new(opts) do

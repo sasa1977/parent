@@ -112,67 +112,9 @@ defmodule Parent.GenServerTest do
            }
   end
 
-  test "invokes handle_child_restarted/2 when a permanent worker stops and restarts the child" do
-    parent = start_test_server!()
-
-    child_id = make_ref()
-
-    child_pid =
-      start_child(parent, %{
-        id: child_id,
-        start: {Agent, :start_link, [fn -> :ok end]},
-        meta: :meta,
-        type: :worker
-      }).pid
-
-    :erlang.trace(parent, true, [:call])
-    :erlang.trace_pattern({TestServer, :handle_child_restarted, 2}, [])
-
-    Process.exit(child_pid, :kill)
-
-    assert_receive {:trace, ^parent, :call,
-                    {Parent.TestServer, :handle_child_restarted, [info, :initial_state]}}
-
-    assert info.id == child_id
-    assert info.reason == :killed
-    assert [child] = TestServer.call(parent, &{Parent.children(), &1})
-    assert child.id == child_id
-    assert child.meta == :meta
-    refute child.pid == child_pid
-  end
-
   test "registers the process" do
     pid = start_test_server!(name: :registered_name)
     assert Process.whereis(:registered_name) == pid
-  end
-
-  test "passes parent restart option" do
-    parent = start_test_server!(name: :registered_name, max_restarts: 1, max_seconds: 1)
-    Process.monitor(parent)
-
-    :erlang.trace(parent, true, [:call])
-    :erlang.trace_pattern({TestServer, :handle_child_restarted, 2}, [])
-
-    child_id = make_ref()
-
-    start_child(
-      parent,
-      Supervisor.child_spec({Agent, fn -> :ok end}, id: child_id)
-    )
-
-    Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> 0 end)
-
-    {:ok, child} = TestServer.call(parent, fn state -> {Parent.child_pid(child_id), state} end)
-    Process.exit(child, :kill)
-
-    assert_receive {:trace, ^parent, :call,
-                    {Parent.TestServer, :handle_child_restarted, [info, :initial_state]}}
-
-    ExUnit.CaptureLog.capture_log(fn ->
-      {:ok, child} = TestServer.call(parent, fn state -> {Parent.child_pid(child_id), state} end)
-      Process.exit(child, :kill)
-      assert_receive {:DOWN, _, :process, ^parent, :too_many_restarts}
-    end)
   end
 
   describe "supervisor" do
