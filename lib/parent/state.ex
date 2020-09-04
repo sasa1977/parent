@@ -98,37 +98,9 @@ defmodule Parent.State do
   @spec pop_child_with_bound_siblings(t, filter) :: {:ok, [child], t} | :error
   def pop_child_with_bound_siblings(state, filter) do
     with {:ok, child} <- child(state, filter) do
-      {children, state} =
-        List.foldr(
-          [child | bound_siblings(state, child)],
-          {[], state},
-          fn child, {children, state} ->
-            {:ok, _child, state} = pop_child(state, pid: child.pid)
-            {[child | children], state}
-          end
-        )
-
+      {children, state} = pop_child_recursive(state, pid: child.pid)
+      children = children |> List.flatten() |> Enum.sort_by(& &1.startup_index)
       {:ok, children, state}
-    end
-  end
-
-  @spec pop_child(t, filter) :: {:ok, child, t} | :error
-  def pop_child(state, filter) do
-    with {:ok, child} <- child(state, filter) do
-      state =
-        Enum.reduce(
-          child.dependencies,
-          state,
-          fn dep_id, state ->
-            update!(state, [id: dep_id], fn dep ->
-              update_in(dep.bound_siblings, &MapSet.delete(&1, child.spec.id))
-            end)
-          end
-        )
-        |> update_in([:id_to_pid], &Map.delete(&1, child.spec.id))
-        |> update_in([:children], &Map.delete(&1, child.pid))
-
-      {:ok, child, state}
     end
   end
 
@@ -202,9 +174,55 @@ defmodule Parent.State do
     {dependencies, state}
   end
 
-  defp bound_siblings(state, child) do
-    child.bound_siblings
-    |> Stream.map(&child!(state, id: &1))
-    |> Enum.sort_by(& &1.startup_index)
+  defp pop_child_recursive(state, filter) do
+    case child(state, filter) do
+      :error ->
+        # This is ok, because we may have already removed this child through another dependency
+        # path.
+        {[], state}
+
+      {:ok, child} ->
+        state = remove_child(state, child)
+
+        {other_children, state} =
+          Enum.reduce(
+            child.bound_siblings,
+            {[], state},
+            fn bound_sibling_id, {children, state} ->
+              {popped_children, state} = pop_child_recursive(state, id: bound_sibling_id)
+              {[popped_children, children], state}
+            end
+          )
+
+        {[child, other_children], state}
+    end
+  end
+
+  defp remove_child(state, child) do
+    state =
+      state
+      |> Map.update!(:id_to_pid, &Map.delete(&1, child.spec.id))
+      |> Map.update!(:children, &Map.delete(&1, child.pid))
+
+    state =
+      Enum.reduce(
+        child.dependencies,
+        state,
+        fn dep_id, state ->
+          update!(state, [id: dep_id], fn dep ->
+            update_in(dep.bound_siblings, &MapSet.delete(&1, child.spec.id))
+          end)
+        end
+      )
+
+    Enum.reduce(
+      child.bound_siblings,
+      state,
+      fn bound_sibling_id, state ->
+        update!(state, [id: bound_sibling_id], fn bound_sibling ->
+          update_in(bound_sibling.dependencies, &MapSet.delete(&1, child.spec.id))
+        end)
+      end
+    )
   end
 end

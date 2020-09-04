@@ -420,12 +420,16 @@ defmodule Parent do
 
   defp handle_child_down(state, child, reason) do
     {:ok, children, state} = State.pop_child_with_bound_siblings(state, pid: child.pid)
-    [child | bound_siblings] = children
+    bound_siblings = Enum.reject(children, &(&1.spec.id == child.spec.id))
     Enum.each(Enum.reverse(bound_siblings), &stop_child(&1, :shutdown))
 
     if requires_restart?(child, reason) do
       {child, state} = record_restart!(state, child)
-      state = Enum.reduce([child | bound_siblings], state, &restart_child!(&2, &1))
+
+      state =
+        [child | bound_siblings]
+        |> Enum.sort_by(& &1.startup_index)
+        |> Enum.reduce(state, &restart_child!(&2, &1))
 
       info = %{
         id: child.spec.id,
