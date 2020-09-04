@@ -52,12 +52,14 @@ defmodule Parent do
           optional(:binds_to) => [child_id],
           optional(:max_restarts) => {limit :: pos_integer, interval :: pos_integer} | :infinity,
           optional(:register?) => boolean,
-          optional(:roles) => [child_role]
+          optional(:roles) => [child_role],
+          optional(:shutdown_group) => shutdown_group
         }
 
   @type child_id :: term
   @type child_meta :: term
   @type child_role :: term
+  @type shutdown_group :: term
 
   @type start :: (() -> Supervisor.on_start_child()) | {module, atom, [term]}
 
@@ -339,7 +341,8 @@ defmodule Parent do
       restart: :permanent,
       binds_to: [],
       register?: false,
-      roles: []
+      roles: [],
+      shutdown_group: nil
     }
   end
 

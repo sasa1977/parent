@@ -133,21 +133,26 @@ defmodule ParentTest do
 
     test "stops all dependencies in the opposite startup order" do
       Parent.initialize()
-      child1 = TestChild.start!(id: :child1)
-      child2 = TestChild.start!(id: :child2, binds_to: [:child1])
+
+      child1 = TestChild.start!(id: :child1, shutdown_group: [:group1])
+      child2 = TestChild.start!(id: :child2, binds_to: [:child1], shutdown_group: [:group2])
       child3 = TestChild.start!(id: :child3, binds_to: [:child2])
-      _child4 = TestChild.start!(id: :child4)
+      child4 = TestChild.start!(id: :child4, shutdown_group: [:group1])
+      child5 = TestChild.start!(id: :child5, shutdown_group: [:group2])
+      TestChild.start!(id: :child6)
 
-      Enum.each([child1, child2, child3], &Process.monitor/1)
-      assert Parent.shutdown_child(:child1) == [:child1, :child2, :child3]
+      Enum.each([child1, child2, child3, child4, child5], &Process.monitor/1)
+      assert Parent.shutdown_child(:child4) == ~w/child1 child2 child3 child4 child5/a
 
-      assert [%{id: :child4}] = Parent.children()
+      assert [%{id: :child6}] = Parent.children()
 
-      assert_receive {:DOWN, _mref, :process, pid1, _reason}
-      assert_receive {:DOWN, _mref, :process, pid2, _reason}
-      assert_receive {:DOWN, _mref, :process, pid3, _reason}
+      pids =
+        Enum.map(1..5, fn _ ->
+          assert_receive {:DOWN, _mref, :process, pid, _reason}
+          pid
+        end)
 
-      assert [pid1, pid2, pid3] == [child3, child2, child1]
+      assert pids == [child5, child4, child3, child2, child1]
     end
 
     test "fails if the parent is not initialized" do
@@ -195,24 +200,29 @@ defmodule ParentTest do
     test "also restarts bound siblings" do
       Parent.initialize()
 
-      child1 = TestChild.start!(id: :child1)
-      child2 = TestChild.start!(id: :child2, binds_to: [:child1])
-      child3 = TestChild.start!(id: :child3, restart: :temporary, binds_to: [:child2])
-      child4 = TestChild.start!(id: :child4)
+      child1 = TestChild.start!(id: :child1, shutdown_group: [:group1])
+      child2 = TestChild.start!(id: :child2, binds_to: [:child1], shutdown_group: [:group2])
+      child3 = TestChild.start!(id: :child3, binds_to: [:child2])
+      child4 = TestChild.start!(id: :child4, shutdown_group: [:group1])
+      child5 = TestChild.start!(id: :child5, shutdown_group: [:group2])
+      child6 = TestChild.start!(id: :child6)
 
-      Process.monitor(child2)
-      assert Parent.restart_child(:child1) == [:child1, :child2, :child3]
+      assert Parent.restart_child(:child4) == ~w/child1 child2 child3 child4 child5/a
 
       assert [
                %{id: :child1, meta: nil, pid: new_child1},
                %{id: :child2, meta: nil, pid: new_child2},
                %{id: :child3, meta: nil, pid: new_child3},
-               %{id: :child4, meta: nil, pid: ^child4}
+               %{id: :child4, meta: nil, pid: new_child4},
+               %{id: :child5, meta: nil, pid: new_child5},
+               %{id: :child6, meta: nil, pid: ^child6}
              ] = Parent.children()
 
       refute new_child1 == child1
       refute new_child2 == child2
       refute new_child3 == child3
+      refute new_child4 == child4
+      refute new_child5 == child5
     end
 
     test "fails if the parent is not initialized" do
@@ -308,26 +318,31 @@ defmodule ParentTest do
     test "also restarts bound siblings" do
       Parent.initialize()
 
-      child1 = TestChild.start!(id: :child1)
-      child2 = TestChild.start!(id: :child2, binds_to: [:child1])
-      child3 = TestChild.start!(id: :child3, restart: :temporary, binds_to: [:child2])
-      child4 = TestChild.start!(id: :child4)
+      child1 = TestChild.start!(id: :child1, shutdown_group: [:group1])
+      child2 = TestChild.start!(id: :child2, binds_to: [:child1], shutdown_group: [:group2])
+      child3 = TestChild.start!(id: :child3, binds_to: [:child2])
+      child4 = TestChild.start!(id: :child4, shutdown_group: [:group1])
+      child5 = TestChild.start!(id: :child5, shutdown_group: [:group2])
+      child6 = TestChild.start!(id: :child6)
 
-      Process.monitor(child2)
-      restart_info = provoke_child_restart!(:child1)
+      restart_info = provoke_child_restart!(:child4)
 
-      assert restart_info.also_restarted == [:child2, :child3]
+      assert restart_info.also_restarted == [:child1, :child2, :child3, :child5]
 
       assert [
                %{id: :child1, meta: nil, pid: new_child1},
                %{id: :child2, meta: nil, pid: new_child2},
                %{id: :child3, meta: nil, pid: new_child3},
-               %{id: :child4, meta: nil, pid: ^child4}
+               %{id: :child4, meta: nil, pid: new_child4},
+               %{id: :child5, meta: nil, pid: new_child5},
+               %{id: :child6, meta: nil, pid: ^child6}
              ] = Parent.children()
 
       refute new_child1 == child1
       refute new_child2 == child2
       refute new_child3 == child3
+      refute new_child4 == child4
+      refute new_child5 == child5
     end
 
     test "takes down the entire parent on too many global restarts" do
