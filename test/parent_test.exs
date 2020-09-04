@@ -112,6 +112,47 @@ defmodule ParentTest do
     end
   end
 
+  describe "start_all_children/1" do
+    test "starts all processes" do
+      Parent.initialize()
+
+      assert [child1, :undefined, child3] =
+               Parent.start_all_children!([
+                 Supervisor.child_spec({Agent, fn -> :ok end}, id: :child1),
+                 %{id: :child2, start: fn -> :ignore end},
+                 Supervisor.child_spec({Agent, fn -> :ok end}, id: :child3)
+               ])
+
+      assert Parent.child_pid(:child1) == {:ok, child1}
+      assert Parent.child_pid(:child3) == {:ok, child3}
+    end
+
+    test "exits at first error" do
+      Parent.initialize()
+      test_pid = self()
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert catch_exit(
+                   Parent.start_all_children!([
+                     {Agent, fn -> :ok end},
+                     %{id: :child2, start: fn -> {:error, :some_error} end},
+                     {Agent, fn -> send(test_pid, :child3_started) end}
+                   ])
+                 ) == :start_error
+        end)
+
+      assert log =~ "Error starting the child :child2: :some_error"
+
+      refute_receive :child3_started
+      assert Parent.num_children() == 0
+    end
+
+    test "fails if the parent is not initialized" do
+      assert_raise RuntimeError, "Parent is not initialized", &start_child/0
+    end
+  end
+
   describe "shutdown_child/1" do
     test "stops the child synchronously, handling the exit message" do
       Parent.initialize()

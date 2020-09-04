@@ -129,6 +129,29 @@ defmodule Parent do
   end
 
   @doc """
+  Synchronously starts all children.
+
+  If some child fails to start, all of the children will be taken down and the parent process
+  will exit.
+  """
+  @spec start_all_children!([child_spec]) :: [pid | :undefined]
+  def start_all_children!(child_specs) do
+    Enum.map(
+      child_specs,
+      fn child_spec ->
+        case start_child(child_spec) do
+          {:ok, pid} ->
+            pid
+
+          {:error, error} ->
+            msg = "Error starting the child #{inspect(child_spec.id)}: #{inspect(error)}"
+            give_up!(state(), :start_error, msg)
+        end
+      end
+    )
+  end
+
+  @doc """
   Returns the pid of the child of the given parent, or nil if such child or parent doesn't exist.
 
   This function can only find registered children, i.e. children which include `register?: true`
