@@ -149,7 +149,9 @@ defmodule ParentTest do
     end
 
     test "fails if the parent is not initialized" do
-      assert_raise RuntimeError, "Parent is not initialized", &start_child/0
+      assert_raise RuntimeError, "Parent is not initialized", fn ->
+        Parent.start_all_children!([Agent])
+      end
     end
   end
 
@@ -157,7 +159,10 @@ defmodule ParentTest do
     test "stops the child synchronously, handling the exit message" do
       Parent.initialize()
       child = start_child!(id: :child)
-      assert Parent.shutdown_child(:child) == [:child]
+
+      assert Map.delete(Parent.shutdown_child(:child), :resurrection_info) ==
+               %{terminated_children: [:child]}
+
       refute Process.alive?(child)
       refute_receive {:EXIT, ^child, _reason}
     end
@@ -227,7 +232,9 @@ defmodule ParentTest do
       start_child!(id: :child6)
 
       Enum.each([child1, child2, child3, child4, child5], &Process.monitor/1)
-      assert Parent.shutdown_child(:child4) == ~w/child1 child2 child3 child4 child5/a
+
+      assert Parent.shutdown_child(:child4).terminated_children ==
+               ~w/child1 child2 child3 child4 child5/a
 
       assert [%{id: :child6}] = Parent.children()
 
@@ -702,9 +709,15 @@ defmodule ParentTest do
       child = start_child!(id: :child, meta: :meta, restart: :temporary)
       GenServer.stop(child)
 
-      assert handle_parent_message() ==
-               {:child_terminated,
-                %{id: :child, meta: :meta, pid: child, reason: :normal, also_terminated: []}}
+      assert {:child_terminated, info} = handle_parent_message()
+
+      assert Map.delete(info, :resurrection_info) == %{
+               id: :child,
+               meta: :meta,
+               pid: child,
+               reason: :normal,
+               also_terminated: []
+             }
 
       assert Parent.num_children() == 0
       assert Parent.children() == []
@@ -743,9 +756,15 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
 
-      assert handle_parent_message() ==
-               {:child_terminated,
-                %{id: :child, meta: :meta, pid: child, reason: :timeout, also_terminated: []}}
+      assert {:child_terminated, info} = handle_parent_message()
+
+      assert Map.delete(info, :resurrection_info) == %{
+               id: :child,
+               meta: :meta,
+               pid: child,
+               reason: :timeout,
+               also_terminated: []
+             }
 
       assert Parent.num_children() == 0
       assert Parent.children() == []
@@ -851,6 +870,56 @@ defmodule ParentTest do
     end
   end
 
+  describe "resurrect_child/1" do
+    test "starts all stopped children preserving the shutdown order" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      child2 = start_child!(id: :child2)
+      start_child!(id: :child3, binds_to: [:child1])
+      resurrection_info = Parent.shutdown_child(:child1).resurrection_info
+      Parent.resurrect_child(resurrection_info)
+
+      assert [
+               %{id: :child1, pid: child1},
+               %{id: :child2, pid: ^child2},
+               %{id: :child3, pid: child3}
+             ] = Parent.children()
+
+      Process.monitor(child1)
+      Process.monitor(child2)
+      Process.monitor(child3)
+
+      Parent.shutdown_all()
+
+      assert_receive {:DOWN, _mref, :process, pid1, _reason}
+      assert_receive {:DOWN, _mref, :process, pid2, _reason}
+      assert_receive {:DOWN, _mref, :process, pid3, _reason}
+
+      assert [pid1, pid2, pid3] == [child3, child2, child1]
+    end
+
+    test "records restart of a terminated child" do
+      Parent.initialize()
+      start_child!(id: :child1, shutdown_group: :group1, restart: :temporary)
+      start_child!(id: :child2)
+      start_child!(id: :child3, shutdown_group: :group1, restart: {:temporary, max_restarts: 1})
+
+      resurrection_info = provoke_child_termination!(:child3, at: 0).resurrection_info
+      Parent.resurrect_child(resurrection_info)
+
+      resurrection_info = provoke_child_termination!(:child3, at: 0).resurrection_info
+
+      log =
+        assert_parent_exit(
+          fn -> Parent.resurrect_child(resurrection_info) end,
+          :too_many_restarts
+        )
+
+      assert log =~ "[error] Too many restarts in parent process"
+      assert Parent.children() == []
+    end
+  end
+
   defp handle_parent_message,
     do: Parent.handle_message(assert_receive message)
 
@@ -861,6 +930,15 @@ defmodule ParentTest do
     Process.exit(pid, Keyword.get(opts, :reason, :shutdown))
     {:child_restarted, restart_info} = handle_parent_message()
     restart_info
+  end
+
+  defp provoke_child_termination!(child_id, opts) do
+    now_ms = Keyword.get(opts, :at, 0)
+    Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> now_ms end)
+    {:ok, pid} = Parent.child_pid(child_id)
+    Process.exit(pid, Keyword.get(opts, :reason, :shutdown))
+    {:child_terminated, terminated_info} = handle_parent_message()
+    terminated_info
   end
 
   defp assert_parent_exit(fun, exit_reason) do

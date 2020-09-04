@@ -15,16 +15,19 @@ defmodule Parent.RestartCounter do
                    else: __MODULE__.TimeProvider.Monotonic
 
   @spec new(Parent.restart() | Parent.restart_limit()) :: t
-  def new(:temporary), do: :never
   def new({_type, opts}), do: new(opts)
 
   def new(opts) do
-    %{
-      max_restarts: Keyword.fetch!(opts, :max_restarts),
-      interval: :timer.seconds(Keyword.fetch!(opts, :max_seconds)),
-      recorded: :queue.new(),
-      size: 0
-    }
+    if Keyword.fetch!(opts, :max_restarts) == :infinity do
+      :never
+    else
+      %{
+        max_restarts: Keyword.fetch!(opts, :max_restarts),
+        interval: :timer.seconds(Keyword.fetch!(opts, :max_seconds)),
+        recorded: :queue.new(),
+        size: 0
+      }
+    end
   end
 
   @spec record_restart(t) :: {:ok, t} | :error

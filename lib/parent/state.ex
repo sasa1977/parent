@@ -39,7 +39,7 @@ defmodule Parent.State do
   end
 
   @spec reinitialize(t) :: t
-  def reinitialize(state), do: initialize(state.opts)
+  def reinitialize(state), do: %{initialize(state.opts) | startup_index: state.startup_index}
 
   @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
   def register_child(state, pid, spec, timer_ref) do

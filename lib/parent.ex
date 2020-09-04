@@ -37,7 +37,8 @@ defmodule Parent do
 
   @type opts :: [option]
   @type option :: {:restart, restart_limit}
-  @type restart :: :temporary | :permanent | :transient | {:permanent | :transient, restart_limit}
+  @type restart :: restart_strategy | {restart_strategy, restart_limit}
+  @type restart_strategy :: :temporary | :permanent | :transient
   @type restart_limit :: [max_restarts: non_neg_integer | :infinity, max_seconds: pos_integer]
 
   @type child_spec :: %{
@@ -77,16 +78,17 @@ defmodule Parent do
           pid: pid,
           meta: child_meta,
           reason: term,
-          also_terminated: [also_terminated]
+          also_terminated: [%{id: child_id, pid: pid, meta: child_meta}],
+          resurrection_info: resurrection_info
         }
-
-  @type also_terminated :: %{id: child_id, pid: pid, meta: child_meta}
 
   @type child_restart_info :: %{
           id: child_id,
           reason: term,
           also_restarted: [child_id]
         }
+
+  @opaque resurrection_info :: %{restart: [State.child()], record_restart: State.child() | nil}
 
   @doc """
   Initializes the state of the parent process.
@@ -202,6 +204,29 @@ defmodule Parent do
   end
 
   @doc """
+  Resurrects the terminated child and its bound siblings.
+
+  If the child was not taken down explicitly via `shutdown_child/1`, and the restart limit has
+  been exceeded, the parent process will terminate.
+
+  The children's startup/shutdown position are restored.
+  """
+  @spec resurrect_child(resurrection_info) :: :ok
+  def resurrect_child(resurrection_info) do
+    {record_restart, state} =
+      case resurrection_info.record_restart do
+        nil -> {nil, state()}
+        child -> record_restart!(state(), child)
+      end
+
+    resurrection_info.restart
+    |> Stream.concat(Enum.reject([record_restart], &is_nil/1))
+    |> Enum.sort_by(& &1.startup_index)
+    |> Enum.reduce(state, &restart_child!(&2, &1))
+    |> store()
+  end
+
+  @doc """
   Terminates the child.
 
   This function will also shut down all siblings directly and transitively bound to the given child.
@@ -210,7 +235,10 @@ defmodule Parent do
   Permanent and transient children won't be restarted, and their specifications won't be preserved.
   In other words, this function completely removes the child and all other children bound to it.
   """
-  @spec shutdown_child(child_id) :: terminated_children :: [child_id]
+  @spec shutdown_child(child_id) :: %{
+          terminated_children: [child_id],
+          resurrection_info: resurrection_info
+        }
   def shutdown_child(child_id) do
     case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
@@ -219,7 +247,11 @@ defmodule Parent do
       {:ok, children, state} ->
         children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
         store(state)
-        Enum.map(children, & &1.spec.id)
+
+        %{
+          terminated_children: Enum.map(children, & &1.spec.id),
+          resurrection_info: %{record_restart: nil, restart: children}
+        }
     end
   end
 
@@ -377,8 +409,6 @@ defmodule Parent do
     }
   end
 
-  defp normalize_restart(:temporary), do: :temporary
-
   defp normalize_restart(type) when type in ~w/temporary permanent transient/a,
     do: normalize_restart({type, max_restarts: :infinity})
 
@@ -480,7 +510,8 @@ defmodule Parent do
         pid: child.pid,
         meta: child.spec.meta,
         reason: reason,
-        also_terminated: Enum.map(bound_siblings, &terminated_info/1)
+        also_terminated: Enum.map(bound_siblings, &terminated_info/1),
+        resurrection_info: %{record_restart: child, restart: bound_siblings}
       }
 
       {{:child_terminated, info}, state}
@@ -504,7 +535,7 @@ defmodule Parent do
     exit(exit)
   end
 
-  defp requires_restart?(%{spec: %{restart: :temporary}}, _reason), do: false
+  defp requires_restart?(%{spec: %{restart: {:temporary, _opts}}}, _reason), do: false
   defp requires_restart?(%{spec: %{restart: {:permanent, _opts}}}, _reason), do: true
   defp requires_restart?(%{spec: %{restart: {:transient, _opts}}}, reason), do: reason != :normal
 
