@@ -210,9 +210,6 @@ defmodule Parent.GenServer do
   @deprecated "Use Parent.update_child_meta/2 instead"
   defdelegate update_child_meta(id, updater), to: Parent
 
-  @deprecated "Use Parent.await_child_termination/2 instead"
-  defdelegate await_child_termination(id, timeout), to: Parent
-
   @deprecated "Use Parent.child?/1 instead"
   defdelegate child?(id), to: Parent
 

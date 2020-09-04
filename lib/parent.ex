@@ -233,32 +233,6 @@ defmodule Parent do
     end
   end
 
-  @doc """
-  Awaits for the child to terminate.
-
-  If the function succeeds, `handle_child_terminated/2` will not be invoked.
-  """
-  @spec await_child_termination(child_id, non_neg_integer() | :infinity) ::
-          {pid, child_meta, reason :: term} | :timeout
-  def await_child_termination(child_id, timeout) do
-    state = state()
-
-    case State.pop_child(state, id: child_id) do
-      :error ->
-        raise "unknown child"
-
-      {:ok, %{pid: pid} = child, state} ->
-        receive do
-          {:EXIT, ^pid, reason} ->
-            kill_timer(child.timer_ref, pid)
-            store(state)
-            {pid, child.spec.meta, reason}
-        after
-          timeout -> :timeout
-        end
-    end
-  end
-
   @doc "Returns the list of running child processes in the startup order."
   @spec children :: [child]
   def children(),

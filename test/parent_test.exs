@@ -444,43 +444,6 @@ defmodule ParentTest do
     end
   end
 
-  describe "await_child_termination/1" do
-    test "waits for the child to stop" do
-      Parent.initialize()
-
-      child = TestChild.start!(id: :child, meta: :meta)
-
-      Task.start_link(fn ->
-        Process.sleep(50)
-        GenServer.stop(child)
-      end)
-
-      assert Parent.await_child_termination(:child, 1000) == {child, :meta, :normal}
-      refute Process.alive?(child)
-    end
-
-    test "returns timeout if the child didn't stop" do
-      Parent.initialize()
-      child = TestChild.start!(id: :child, meta: :meta)
-      assert Parent.await_child_termination(:child, 0) == :timeout
-      assert Process.alive?(child)
-    end
-
-    test "raises if unknown child is given" do
-      Parent.initialize()
-
-      assert_raise RuntimeError, "unknown child", fn ->
-        Parent.await_child_termination(:child, 1000)
-      end
-    end
-
-    test "fails if the parent is not initialized" do
-      assert_raise RuntimeError, "Parent is not initialized", fn ->
-        Parent.await_child_termination(:foo, :infinity)
-      end
-    end
-  end
-
   describe "children/0" do
     test "returns child processes" do
       Parent.initialize()
