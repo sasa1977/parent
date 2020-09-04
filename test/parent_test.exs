@@ -6,6 +6,8 @@ defmodule ParentTest do
       :erlang.unique_integer([:monotonic, :positive]) * :timer.seconds(5)
     end)
 
+    :ets.new(__MODULE__, [:named_table, :public])
+
     :ok
   end
 
@@ -917,7 +919,9 @@ defmodule ParentTest do
 
     %{
       id: id,
-      start: {Agent, :start_link, [fn -> if :persistent_term.get(id), do: raise("error") end]}
+      start:
+        {Agent, :start_link,
+         [fn -> if :ets.lookup(__MODULE__, id) == [{id, true}], do: raise("error") end]}
     }
     |> Map.merge(Map.new(overrides))
     |> Parent.start_child()
@@ -933,8 +937,8 @@ defmodule ParentTest do
     pid
   end
 
-  def succeed_on_child_start(id), do: :persistent_term.put(id, false)
-  def raise_on_child_start(id), do: :persistent_term.put(id, true)
+  def succeed_on_child_start(id), do: :ets.insert(__MODULE__, {id, false})
+  def raise_on_child_start(id), do: :ets.insert(__MODULE__, {id, true})
 
   defp start_parent(child_specs) do
     test_pid = self()
