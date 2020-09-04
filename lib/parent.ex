@@ -112,11 +112,19 @@ defmodule Parent do
     state = state()
     child_spec = expand_child_spec(child_spec)
 
-    with :ok <- validate_id(state, child_spec.id),
-         {:ok, pid, timer_ref} <- start_child_process(state, child_spec) do
-      state = State.register_child(state, pid, child_spec, timer_ref)
-      store(state)
-      {:ok, pid}
+    with :ok <- validate_id(state, child_spec.id) do
+      case start_child_process(state, child_spec) do
+        {:ok, pid, timer_ref} ->
+          state = State.register_child(state, pid, child_spec, timer_ref)
+          store(state)
+          {:ok, pid}
+
+        :ignore ->
+          {:ok, :undefined}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -483,6 +491,9 @@ defmodule Parent do
     case start_child_process(state, child.spec) do
       {:ok, new_pid, timer_ref} ->
         State.reregister_child(state, child, new_pid, timer_ref)
+
+      :ignore ->
+        state
 
       error ->
         error = "Failed to restart child #{inspect(child.spec.id)}: #{inspect(error)}."

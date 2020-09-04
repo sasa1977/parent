@@ -84,7 +84,7 @@ defmodule ParentTest do
 
     test "handles :ignore by the started process" do
       Parent.initialize()
-      assert start_child(start: fn -> :ignore end) == :ignore
+      assert start_child(start: fn -> :ignore end) == {:ok, :undefined}
     end
 
     test "handles error by the started process" do
