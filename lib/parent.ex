@@ -443,10 +443,59 @@ defmodule Parent do
   end
 
   defp check_bindings(state, child_spec) do
-    case Enum.filter(child_spec.binds_to, &(State.child(state, id: &1) == :error)) do
+    with :ok <- check_missing_deps(state, child_spec),
+         :ok <- check_valid_bindings!(state, child_spec),
+         do: check_valid_shutdown_group(state, child_spec)
+  end
+
+  defp check_missing_deps(state, child_spec) do
+    case Enum.reject(child_spec.binds_to, &State.child?(state, id: &1)) do
       [] -> :ok
       missing_deps -> {:error, {:missing_deps, missing_deps}}
     end
+  end
+
+  defp check_valid_bindings!(state, child_spec) do
+    child_spec.binds_to
+    |> Stream.map(&State.child!(state, id: &1))
+    |> Enum.find(fn dep ->
+      dep.spec.restart == :temporary or
+        (dep.spec.restart == :transient and child_spec.restart != :temporary)
+    end)
+    |> case do
+      nil ->
+        :ok
+
+      forbidden_dep ->
+        give_up!(
+          state,
+          :invalid_binding,
+          "Forbidden binding from #{child_spec.restart} child #{inspect(child_spec.id)} " <>
+            "to #{forbidden_dep.spec.restart} child #{forbidden_dep.spec.id}"
+        )
+    end
+  end
+
+  defp check_valid_shutdown_group(state, child_spec) do
+    state
+    |> State.children_in_shutdown_group(child_spec.shutdown_group)
+    |> Stream.map(& &1.spec)
+    |> Stream.concat([child_spec])
+    |> Stream.map(& &1.restart)
+    |> Enum.uniq()
+    |> case do
+      [_] ->
+        :ok
+
+      [_ | _] ->
+        msg =
+          "Shutdown group #{inspect(child_spec.shutdown_group)} " <>
+            " has children with different restart types"
+
+        give_up!(state, :invalid_shutdown_group, msg)
+    end
+
+    :ok
   end
 
   defp invoke_start_function({mod, fun, args}), do: apply(mod, fun, args)

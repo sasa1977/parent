@@ -226,11 +226,11 @@ defmodule ParentTest do
     test "stops all dependencies in the opposite startup order" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1, shutdown_group: [:group1])
-      child2 = start_child!(id: :child2, binds_to: [:child1], shutdown_group: [:group2])
+      child1 = start_child!(id: :child1, shutdown_group: :group1)
+      child2 = start_child!(id: :child2, binds_to: [:child1], shutdown_group: :group2)
       child3 = start_child!(id: :child3, binds_to: [:child2])
-      child4 = start_child!(id: :child4, shutdown_group: [:group1])
-      child5 = start_child!(id: :child5, shutdown_group: [:group2])
+      child4 = start_child!(id: :child4, shutdown_group: :group1)
+      child5 = start_child!(id: :child5, shutdown_group: :group2)
       start_child!(id: :child6)
 
       Enum.each([child1, child2, child3, child4, child5], &Process.monitor/1)
@@ -276,11 +276,11 @@ defmodule ParentTest do
     test "also restarts bound siblings" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1, shutdown_group: [:group1])
-      child2 = start_child!(id: :child2, binds_to: [:child1], shutdown_group: [:group2])
+      child1 = start_child!(id: :child1, shutdown_group: :group1)
+      child2 = start_child!(id: :child2, binds_to: [:child1], shutdown_group: :group2)
       child3 = start_child!(id: :child3, binds_to: [:child2])
-      child4 = start_child!(id: :child4, shutdown_group: [:group1])
-      child5 = start_child!(id: :child5, shutdown_group: [:group2])
+      child4 = start_child!(id: :child4, shutdown_group: :group1)
+      child5 = start_child!(id: :child5, shutdown_group: :group2)
       child6 = start_child!(id: :child6)
 
       Parent.restart_child(:child4)
@@ -382,11 +382,11 @@ defmodule ParentTest do
     test "also restarts bound siblings" do
       Parent.initialize()
 
-      child1 = start_child!(id: :child1, shutdown_group: [:group1])
-      child2 = start_child!(id: :child2, binds_to: [:child1], shutdown_group: [:group2])
+      child1 = start_child!(id: :child1, shutdown_group: :group1)
+      child2 = start_child!(id: :child2, binds_to: [:child1], shutdown_group: :group2)
       child3 = start_child!(id: :child3, binds_to: [:child2])
-      child4 = start_child!(id: :child4, shutdown_group: [:group1])
-      child5 = start_child!(id: :child5, shutdown_group: [:group2])
+      child4 = start_child!(id: :child4, shutdown_group: :group1)
+      child5 = start_child!(id: :child5, shutdown_group: :group2)
       child6 = start_child!(id: :child6)
 
       provoke_child_restart!(:child4)
@@ -694,9 +694,9 @@ defmodule ParentTest do
     test "terminates dependencies if a child stops" do
       Parent.initialize()
 
-      {:ok, child1} = start_child(id: :child1, restart: :temporary)
+      {:ok, child1} = start_child(id: :child1, restart: :transient)
       {:ok, child2} = start_child(id: :child2, restart: :temporary, binds_to: [:child1])
-      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child2])
+      {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child1])
       {:ok, _child4} = start_child(id: :child4, restart: :temporary)
 
       Enum.each([child2, child3], &Process.monitor/1)

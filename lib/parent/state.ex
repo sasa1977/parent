@@ -93,6 +93,13 @@ defmodule Parent.State do
     |> Enum.sort_by(& &1.startup_index)
   end
 
+  @spec children_in_shutdown_group(t, Parent.shutdown_group()) :: [child]
+  def children_in_shutdown_group(state, shutdown_group) do
+    state.shutdown_groups
+    |> Map.get(shutdown_group, [])
+    |> Enum.map(&child!(state, id: &1))
+  end
+
   @spec record_restart(t) :: {:ok, t} | :error
   def record_restart(state) do
     with {:ok, counter} <- RestartCounter.record_restart(state.restart_counter),
