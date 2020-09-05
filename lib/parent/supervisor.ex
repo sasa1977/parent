@@ -18,6 +18,10 @@ defmodule Parent.Supervisor do
   def shutdown_child(supervisor, child_id),
     do: GenServer.call(supervisor, {:shutdown_child, child_id})
 
+  @spec restart_child(GenServer.server(), Parent.child_spec()) :: :ok | {:error, :unknown_child}
+  def restart_child(supervisor, child_id),
+    do: GenServer.call(supervisor, {:restart_child, child_id})
+
   @spec shutdown_all(GenServer.server()) :: :ok
   def shutdown_all(supervisor),
     do: GenServer.call(supervisor, :shutdown_all)
@@ -40,6 +44,15 @@ defmodule Parent.Supervisor do
     response =
       if Parent.child?(child_id),
         do: {:ok, Parent.shutdown_child(child_id)},
+        else: {:error, :unknown_child}
+
+    {:reply, response, state}
+  end
+
+  def handle_call({:restart_child, child_id}, _call, state) do
+    response =
+      if Parent.child?(child_id),
+        do: Parent.restart_child(child_id),
         else: {:error, :unknown_child}
 
     {:reply, response, state}

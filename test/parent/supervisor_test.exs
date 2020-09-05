@@ -97,6 +97,21 @@ defmodule Parent.SupervisorTest do
     end
   end
 
+  describe "restart_child/1" do
+    test "stops the given child" do
+      pid = start_supervised!({Supervisor, children: [child_spec(id: :child, register?: true)]})
+      pid1 = Parent.whereis_child(pid, :child)
+      assert Supervisor.restart_child(pid, :child) == :ok
+      refute Parent.whereis_child(pid, :child) == pid1
+      assert [{:child, _, _, _}] = :supervisor.which_children(pid)
+    end
+
+    test "returns error when child is unknown" do
+      pid = start_supervised!({Supervisor, children: []})
+      assert Supervisor.restart_child(pid, :child) == {:error, :unknown_child}
+    end
+  end
+
   describe "shutdown_all/1" do
     test "stops all children" do
       pid =
