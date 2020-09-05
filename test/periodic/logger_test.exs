@@ -1,6 +1,6 @@
 defmodule Periodic.LoggerTest do
   use ExUnit.Case, async: false
-  import ExUnit.CaptureLog
+  import Parent.CaptureLog
   import Periodic.Test
   import Periodic.TestHelper
 

@@ -1,5 +1,6 @@
 defmodule ParentTest do
   use ExUnit.Case, async: true
+  import Parent.CaptureLog
 
   setup do
     Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn ->
@@ -134,7 +135,7 @@ defmodule ParentTest do
       test_pid = self()
 
       log =
-        ExUnit.CaptureLog.capture_log(fn ->
+        capture_log(fn ->
           assert catch_exit(
                    Parent.start_all_children!([
                      {Agent, fn -> :ok end},
@@ -915,7 +916,7 @@ defmodule ParentTest do
   end
 
   defp assert_parent_exit(fun, exit_reason) do
-    log = ExUnit.CaptureLog.capture_log(fn -> assert catch_exit(fun.()) == exit_reason end)
+    log = capture_log(fn -> assert catch_exit(fun.()) == exit_reason end)
     assert_receive {:EXIT, _string_io_pid, :normal}
     log
   end
