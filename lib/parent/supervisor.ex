@@ -9,6 +9,14 @@ defmodule Parent.Supervisor do
     Parent.GenServer.start_link(__MODULE__, children, options)
   end
 
+  @spec child_pid(GenServer.server(), Parent.child_id()) :: {:ok, pid} | :error
+  def child_pid(supervisor, child_id),
+    do: GenServer.call(supervisor, {:child_pid, child_id})
+
+  @spec child_meta(GenServer.server(), Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
+  def child_meta(supervisor, child_id),
+    do: GenServer.call(supervisor, {:child_meta, child_id})
+
   @spec start_child(GenServer.server(), Parent.child_spec()) :: Supervisor.on_start_child()
   def start_child(supervisor, child_spec),
     do: GenServer.call(supervisor, {:start_child, child_spec}, :infinity)
@@ -37,6 +45,12 @@ defmodule Parent.Supervisor do
   end
 
   @impl GenServer
+  def handle_call({:child_pid, child_id}, _call, state),
+    do: {:reply, Parent.child_pid(child_id), state}
+
+  def handle_call({:child_meta, child_id}, _call, state),
+    do: {:reply, Parent.child_meta(child_id), state}
+
   def handle_call({:start_child, child_spec}, _call, state),
     do: {:reply, Parent.start_child(child_spec), state}
 
