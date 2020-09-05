@@ -102,8 +102,7 @@ defmodule Parent.State do
   @spec pop_child_with_bound_siblings(t, filter) :: {:ok, [child], t} | :error
   def pop_child_with_bound_siblings(state, filter) do
     with {:ok, child} <- child(state, filter) do
-      {children, state} = pop_child_recursive(state, pid: child.pid)
-      children = children |> List.flatten() |> Enum.sort_by(& &1.startup_index)
+      {children, state} = pop_child_and_bound_children(state, pid: child.pid)
       {:ok, children, state}
     end
   end
@@ -116,6 +115,9 @@ defmodule Parent.State do
     do: with({:ok, pid} <- child_pid(state, id), do: child(state, pid: pid))
 
   def child(state, pid: pid), do: Map.fetch(state.children, pid)
+
+  @spec child?(t, filter) :: boolean()
+  def child?(state, filter), do: match?({:ok, _child}, child(state, filter))
 
   @spec child!(t, filter) :: child
   def child!(state, filter) do
@@ -178,33 +180,29 @@ defmodule Parent.State do
     {dependencies, state}
   end
 
-  defp pop_child_recursive(state, filter) do
-    case child(state, filter) do
-      :error ->
-        # This is ok, because we may have already removed this child through another dependency
-        # path.
-        {[], state}
-
-      {:ok, child} ->
-        state = remove_child(state, child)
-
-        {other_children, state} =
-          state.shutdown_groups
-          |> Map.get(child.spec.shutdown_group, [])
-          |> Stream.concat(child.bound_siblings)
-          |> Enum.reduce(
-            {[], state},
-            fn bound_sibling_id, {children, state} ->
-              {popped_children, state} = pop_child_recursive(state, id: bound_sibling_id)
-              {[popped_children, children], state}
-            end
-          )
-
-        {[child, other_children], state}
-    end
+  defp pop_child_and_bound_children(state, filter) do
+    child = child!(state, filter)
+    children = Map.values(all_bound_children(state, child, %{child.spec.id => child}))
+    state = Enum.reduce(children, state, &remove_child(&2, &1.spec.id))
+    {Enum.sort_by(children, & &1.startup_index), state}
   end
 
-  defp remove_child(state, child) do
+  defp all_bound_children(state, child, deps) do
+    state.shutdown_groups
+    |> Map.get(child.spec.shutdown_group, [])
+    |> Stream.concat(child.bound_siblings)
+    |> Stream.uniq()
+    |> Stream.map(&child!(state, id: &1))
+    |> Enum.reduce(deps, fn dep, deps ->
+      if Map.has_key?(deps, dep.spec.id),
+        do: deps,
+        else: all_bound_children(state, dep, Map.put(deps, dep.spec.id, dep))
+    end)
+  end
+
+  defp remove_child(state, child_id) do
+    child = child!(state, id: child_id)
+
     state =
       state
       |> Map.update!(:id_to_pid, &Map.delete(&1, child.spec.id))
