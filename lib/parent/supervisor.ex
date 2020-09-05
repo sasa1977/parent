@@ -18,6 +18,10 @@ defmodule Parent.Supervisor do
   def shutdown_child(supervisor, child_id),
     do: GenServer.call(supervisor, {:shutdown_child, child_id})
 
+  @spec shutdown_all(GenServer.server()) :: :ok
+  def shutdown_all(supervisor),
+    do: GenServer.call(supervisor, :shutdown_all)
+
   @impl GenServer
   def init(children) do
     Parent.start_all_children!(children)
@@ -36,6 +40,9 @@ defmodule Parent.Supervisor do
 
     {:reply, response, state}
   end
+
+  def handle_call(:shutdown_all, _call, state),
+    do: {:reply, Parent.shutdown_all(), state}
 
   @spec child_spec([option]) :: Parent.child_spec()
 end
