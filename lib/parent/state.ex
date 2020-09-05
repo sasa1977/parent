@@ -33,7 +33,7 @@ defmodule Parent.State do
       id_to_pid: %{},
       children: %{},
       startup_index: 0,
-      restart_counter: RestartCounter.new(opts),
+      restart_counter: RestartCounter.new(opts[:max_restarts], opts[:max_seconds]),
       shutdown_groups: %{}
     }
   end
@@ -55,7 +55,7 @@ defmodule Parent.State do
       startup_index: state.startup_index,
       dependencies: dependencies,
       bound_siblings: MapSet.new(),
-      restart_counter: RestartCounter.new(spec.restart)
+      restart_counter: RestartCounter.new(spec.max_restarts, spec.max_seconds)
     }
 
     state

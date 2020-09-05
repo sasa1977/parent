@@ -2,36 +2,32 @@ defmodule Parent.RestartCounter do
   @moduledoc false
 
   @opaque t ::
-            :never
-            | %{
-                max_restarts: pos_integer,
-                interval: pos_integer,
-                recorded: :queue.queue(pos_integer),
-                size: non_neg_integer
-              }
+            %{
+              max_restarts: pos_integer,
+              interval: pos_integer,
+              recorded: :queue.queue(pos_integer),
+              size: non_neg_integer
+            }
+            | nil
 
   @time_provider if Mix.env() == :test,
                    do: __MODULE__.TimeProvider.Test,
                    else: __MODULE__.TimeProvider.Monotonic
 
-  @spec new(Parent.restart() | [Parent.restart_limit()]) :: t
-  def new({_type, opts}), do: new(opts)
+  @spec new(:infinity | non_neg_integer, pos_integer) :: t
+  def new(:infinity, _max_seconds), do: nil
 
-  def new(opts) do
-    if Keyword.fetch!(opts, :max_restarts) == :infinity do
-      :never
-    else
-      %{
-        max_restarts: Keyword.fetch!(opts, :max_restarts),
-        interval: :timer.seconds(Keyword.fetch!(opts, :max_seconds)),
-        recorded: :queue.new(),
-        size: 0
-      }
-    end
+  def new(max_restarts, max_seconds) do
+    %{
+      max_restarts: max_restarts,
+      interval: :timer.seconds(max_seconds),
+      recorded: :queue.new(),
+      size: 0
+    }
   end
 
   @spec record_restart(t) :: {:ok, t} | :error
-  def record_restart(:never), do: {:ok, :never}
+  def record_restart(nil), do: {:ok, nil}
 
   def record_restart(state) do
     now = @time_provider.now_ms()

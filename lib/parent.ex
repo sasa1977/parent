@@ -36,10 +36,7 @@ defmodule Parent do
   alias Parent.{ChildRegistry, State}
 
   @type opts :: [option]
-  @type option :: restart_limit
-  @type restart :: restart_strategy | {restart_strategy, [restart_limit]}
-  @type restart_strategy :: :temporary | :permanent | :transient
-  @type restart_limit ::
+  @type option ::
           {:max_restarts, non_neg_integer | :infinity}
           | {:max_seconds, pos_integer}
 
@@ -51,7 +48,9 @@ defmodule Parent do
           optional(:meta) => child_meta,
           optional(:shutdown) => shutdown,
           optional(:timeout) => pos_integer | :infinity,
-          optional(:restart) => restart,
+          optional(:restart) => :temporary | :permanent | :transient,
+          optional(:max_restarts) => non_neg_integer | :infinity,
+          optional(:max_seconds) => pos_integer,
           optional(:binds_to) => [child_id],
           optional(:register?) => boolean,
           optional(:roles) => [child_role],
@@ -378,7 +377,6 @@ defmodule Parent do
     |> Map.merge(default_type_and_shutdown_spec(Map.get(child_spec, :type, :worker)))
     |> Map.put(:modules, default_modules(child_spec.start))
     |> Map.merge(child_spec)
-    |> Map.update!(:restart, &normalize_restart/1)
   end
 
   defp expand_child_spec(_other), do: raise("invalid child_spec")
@@ -388,18 +386,14 @@ defmodule Parent do
       meta: nil,
       timeout: :infinity,
       restart: :permanent,
+      max_restarts: :infinity,
+      max_seconds: :timer.seconds(5),
       binds_to: [],
       register?: false,
       roles: [],
       shutdown_group: nil
     }
   end
-
-  defp normalize_restart(type) when type in ~w/temporary permanent transient/a,
-    do: normalize_restart({type, max_restarts: :infinity})
-
-  defp normalize_restart({type, opts}),
-    do: {type, Keyword.merge([max_restarts: :infinity, max_seconds: 5], opts)}
 
   defp default_type_and_shutdown_spec(:worker), do: %{type: :worker, shutdown: :timer.seconds(5)}
   defp default_type_and_shutdown_spec(:supervisor), do: %{type: :supervisor, shutdown: :infinity}
@@ -494,9 +488,10 @@ defmodule Parent do
     end
   end
 
-  defp requires_restart?(%{spec: %{restart: {:temporary, _opts}}}, _reason), do: false
-  defp requires_restart?(%{spec: %{restart: {:permanent, _opts}}}, _reason), do: true
-  defp requires_restart?(%{spec: %{restart: {:transient, _opts}}}, reason), do: reason != :normal
+  defp requires_restart?(child, reason) do
+    child.spec.restart == :permanent or
+      (child.spec.restart == :transient and reason != :normal)
+  end
 
   defp return_children(state, return_info) do
     {record_restart, state} =

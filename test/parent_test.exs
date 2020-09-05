@@ -445,7 +445,7 @@ defmodule ParentTest do
     test "takes down the entire parent on too many restarts of a single child" do
       Parent.initialize(max_restarts: :infinity)
 
-      start_child!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 1})
+      start_child!(id: :child1, max_restarts: 2, max_seconds: 1)
       start_child!(id: :child2)
 
       provoke_child_restart!(:child1)
@@ -458,7 +458,7 @@ defmodule ParentTest do
 
     test "doesn't stop parent if max_restarts of the child is infinity" do
       Parent.initialize(max_restarts: :infinity)
-      start_child!(id: :child1, restart: {:permanent, max_restarts: :infinity})
+      start_child!(id: :child1, max_restarts: :infinity)
 
       provoke_child_restart!(:child1)
       provoke_child_restart!(:child1)
@@ -479,7 +479,7 @@ defmodule ParentTest do
     test "clears recorded restarts after the interval has passed" do
       Parent.initialize()
 
-      start_child!(id: :child1, restart: {:permanent, max_restarts: 2, max_seconds: 2})
+      start_child!(id: :child1, max_restarts: 2, max_seconds: 2)
       start_child!(id: :child2)
 
       provoke_child_restart!(:child1, at: :timer.seconds(0))
@@ -868,7 +868,7 @@ defmodule ParentTest do
       Parent.initialize()
       start_child!(id: :child1, shutdown_group: :group1, restart: :temporary)
       start_child!(id: :child2)
-      start_child!(id: :child3, shutdown_group: :group1, restart: {:temporary, max_restarts: 1})
+      start_child!(id: :child3, shutdown_group: :group1, restart: :temporary, max_restarts: 1)
 
       return_info = provoke_child_termination!(:child3, at: 0).return_info
       Parent.return_children(return_info)
