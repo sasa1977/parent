@@ -42,8 +42,8 @@ defmodule Parent do
           | {:registry?, boolean}
 
   @type child_spec :: %{
-          :id => child_id,
           :start => start,
+          optional(:id) => child_id,
           optional(:modules) => [module] | :dynamic,
           optional(:type) => :worker | :supervisor,
           optional(:meta) => child_meta,
@@ -406,6 +406,7 @@ defmodule Parent do
 
   defp default_spec do
     %{
+      id: make_ref(),
       meta: nil,
       timeout: :infinity,
       restart: :permanent,

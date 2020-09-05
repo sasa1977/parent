@@ -33,6 +33,13 @@ defmodule ParentTest do
       assert_receive ^child
     end
 
+    test "implicitly sets the id" do
+      Parent.initialize()
+      {:ok, child1} = Parent.start_child(%{start: fn -> Agent.start_link(fn -> :ok end) end})
+      {:ok, child2} = Parent.start_child(%{start: fn -> Agent.start_link(fn -> :ok end) end})
+      assert [%{pid: ^child1}, %{pid: ^child2}] = Parent.children()
+    end
+
     test "accepts module for child spec" do
       defmodule TestChild1 do
         def child_spec(_arg) do
@@ -932,13 +939,15 @@ defmodule ParentTest do
     id = Keyword.get(overrides, :id, make_ref())
     succeed_on_child_start(id)
 
-    %{
-      id: id,
-      start:
-        {Agent, :start_link,
-         [fn -> if :ets.lookup(__MODULE__, id) == [{id, true}], do: raise("error") end]}
-    }
-    |> Map.merge(Map.new(overrides))
+    Parent.child_spec(
+      %{
+        id: id,
+        start:
+          {Agent, :start_link,
+           [fn -> if :ets.lookup(__MODULE__, id) == [{id, true}], do: raise("error") end]}
+      },
+      overrides
+    )
     |> Parent.start_child()
   end
 

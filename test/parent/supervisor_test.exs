@@ -201,10 +201,6 @@ defmodule Parent.SupervisorTest do
     pid
   end
 
-  defp child_spec(overrides) do
-    Map.merge(
-      %{id: make_ref(), start: {Agent, :start_link, [fn -> :ok end]}},
-      Map.new(overrides)
-    )
-  end
+  defp child_spec(overrides),
+    do: Parent.child_spec(%{start: {Agent, :start_link, [fn -> :ok end]}}, overrides)
 end
