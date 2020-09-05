@@ -39,6 +39,7 @@ defmodule Parent do
   @type option ::
           {:max_restarts, non_neg_integer | :infinity}
           | {:max_seconds, pos_integer}
+          | {:registry?, boolean}
 
   @type child_spec :: %{
           :id => child_id,
@@ -52,7 +53,6 @@ defmodule Parent do
           optional(:max_restarts) => non_neg_integer | :infinity,
           optional(:max_seconds) => pos_integer,
           optional(:binds_to) => [child_id],
-          optional(:register?) => boolean,
           optional(:roles) => [child_role],
           optional(:shutdown_group) => shutdown_group
         }
@@ -108,6 +108,7 @@ defmodule Parent do
   def initialize(opts \\ []) do
     if initialized?(), do: raise("Parent state is already initialized")
     Process.flag(:trap_exit, true)
+    if Keyword.get(opts, :registry?, false), do: ChildRegistry.initialize()
     store(State.initialize(opts))
   end
 
@@ -163,8 +164,8 @@ defmodule Parent do
   @doc """
   Returns the pid of the child of the given parent, or nil if such child or parent doesn't exist.
 
-  This function can only find registered children, i.e. children which include `register?: true`
-  in their child spec.
+  This function only works for parent processes which are initialized with the `registry?: true`
+  option.
 
   This function can be invoked outside of the parent process.
   """
@@ -179,8 +180,8 @@ defmodule Parent do
   @doc """
   Returns all the pids of the children of the given parent who are in the given role.
 
-  This function can only find registered children, i.e. children which include `register?: true`
-  in their child spec.
+  This function only works for parent processes which are initialized with the `registry?: true`
+  option.
 
   This function can be invoked outside of the parent process.
   """
@@ -411,7 +412,6 @@ defmodule Parent do
       max_restarts: :infinity,
       max_seconds: :timer.seconds(5),
       binds_to: [],
-      register?: false,
       roles: [],
       shutdown_group: nil
     }
@@ -441,7 +441,7 @@ defmodule Parent do
           timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
         end
 
-      if child_spec.register?, do: ChildRegistry.register(pid, child_spec)
+      if State.registry?(state), do: ChildRegistry.register(pid, child_spec)
 
       {:ok, pid, timer_ref}
     end
@@ -544,7 +544,7 @@ defmodule Parent do
   defp do_handle_message(_state, _other), do: nil
 
   defp handle_child_down(state, child, reason) do
-    if child.spec.register?, do: ChildRegistry.unregister(child.pid)
+    if State.registry?(state), do: ChildRegistry.unregister(child.pid)
     {:ok, children, state} = State.pop_child_with_bound_siblings(state, pid: child.pid)
     bound_siblings = Enum.reject(children, &(&1.spec.id == child.spec.id))
     Enum.each(Enum.reverse(bound_siblings), &stop_child(&1, :shutdown))
@@ -651,7 +651,7 @@ defmodule Parent do
     exit_signal = if child.spec.shutdown == :brutal_kill, do: :kill, else: reason
     wait_time = if exit_signal == :kill, do: :infinity, else: child.spec.shutdown
     sync_stop_process(child.pid, exit_signal, wait_time)
-    if child.spec.register?, do: ChildRegistry.unregister(child.pid)
+    if State.registry?(state()), do: ChildRegistry.unregister(child.pid)
   end
 
   defp sync_stop_process(pid, exit_signal, wait_time) do

@@ -780,24 +780,22 @@ defmodule ParentTest do
 
   describe "whereis_child/2" do
     test "finds registered children by id" do
-      Parent.initialize()
-      child1 = start_child!(id: :child1, register?: true)
-      start_child!(id: :child2)
-      start_child!(id: :child3, register?: false)
+      Parent.initialize(registry?: true)
+      child1 = start_child!(id: :child1)
+      child2 = start_child!(id: :child2)
 
       assert Parent.whereis_child(self(), :child1) == child1
-      assert is_nil(Parent.whereis_child(self(), :child2))
-      assert is_nil(Parent.whereis_child(self(), :child3))
+      assert Parent.whereis_child(self(), :child2) == child2
 
       assert GenServer.whereis({:via, Parent, {self(), :child1}}) == child1
-      assert is_nil(GenServer.whereis({:via, Parent, {self(), :child2}}))
+      assert GenServer.whereis({:via, Parent, {self(), :child2}}) == child2
     end
 
     test "finds registered children by roles" do
-      Parent.initialize()
-      child1 = start_child!(register?: true, roles: [:foo, :bar])
-      child2 = start_child!(register?: true, roles: [:foo])
-      start_child!(register?: true, roles: [])
+      Parent.initialize(registry?: true)
+      child1 = start_child!(roles: [:foo, :bar])
+      child2 = start_child!(roles: [:foo])
+      start_child!(roles: [])
       start_child!()
 
       assert Parent.children_in_role(self(), :foo) == [child1, child2]
@@ -805,16 +803,16 @@ defmodule ParentTest do
     end
 
     test "finds the child inside its parent" do
-      {parent1, [parent1_child]} = start_parent([[id: :child, register?: true]])
-      {parent2, [parent2_child]} = start_parent([[id: :child, register?: true]])
+      {parent1, [parent1_child]} = start_parent([[id: :child]], registry?: true)
+      {parent2, [parent2_child]} = start_parent([[id: :child]], registry?: true)
 
       assert Parent.whereis_child(parent1, :child) == parent1_child
       assert Parent.whereis_child(parent2, :child) == parent2_child
     end
 
     test "can dereference aliases" do
-      Parent.initialize()
-      child1 = start_child!(id: :child1, register?: true)
+      Parent.initialize(registry?: true)
+      child1 = start_child!(id: :child1)
 
       registered_name = :"alias_#{System.unique_integer([:positive, :monotonic])}"
       Process.register(self(), registered_name)
@@ -826,8 +824,8 @@ defmodule ParentTest do
     end
 
     test "removes registered child after it terminates" do
-      Parent.initialize()
-      start_child!(id: :child, roles: [:foo, :bar], register?: true)
+      Parent.initialize(registry?: true)
+      start_child!(id: :child, roles: [:foo, :bar])
       Parent.shutdown_child(:child)
 
       assert is_nil(Parent.whereis_child(self(), :child))
@@ -957,7 +955,7 @@ defmodule ParentTest do
   def succeed_on_child_start(id), do: :ets.insert(__MODULE__, {id, false})
   def raise_on_child_start(id), do: :ets.insert(__MODULE__, {id, true})
 
-  defp start_parent(child_specs) do
+  defp start_parent(child_specs, parent_opts \\ []) do
     test_pid = self()
 
     parent_pid =
@@ -965,7 +963,7 @@ defmodule ParentTest do
         Supervisor.child_spec(
           {Task,
            fn ->
-             Parent.initialize()
+             Parent.initialize(parent_opts)
              children = Enum.map(child_specs, &start_child!/1)
              send(test_pid, children)
 

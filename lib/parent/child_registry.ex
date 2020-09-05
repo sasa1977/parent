@@ -2,6 +2,17 @@ defmodule Parent.ChildRegistry do
   @moduledoc false
   alias Parent.MetaRegistry
 
+  def initialize do
+    MetaRegistry.register_table!(
+      :ets.new(__MODULE__, [
+        :public,
+        :duplicate_bag,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
+    )
+  end
+
   @spec whereis_child(GenServer.server(), Parent.child_id()) :: pid | nil
   def whereis_child(parent, child_id) do
     with parent_pid when not is_nil(parent_pid) <- GenServer.whereis(parent),
@@ -26,8 +37,10 @@ defmodule Parent.ChildRegistry do
 
   @spec register(pid, Parent.child_spec()) :: :ok
   def register(child_pid, child_spec) do
+    {:ok, table} = MetaRegistry.table(self())
+
     :ets.insert(
-      ensure_table(),
+      table,
       [
         {child_pid, child_spec.id, child_spec.roles},
         {{:id, child_spec.id}, child_pid}
@@ -50,24 +63,5 @@ defmodule Parent.ChildRegistry do
     end
 
     :ok
-  end
-
-  defp ensure_table do
-    case MetaRegistry.table(self()) do
-      {:ok, table} ->
-        table
-
-      :error ->
-        table =
-          :ets.new(__MODULE__, [
-            :public,
-            :duplicate_bag,
-            read_concurrency: true,
-            write_concurrency: true
-          ])
-
-        MetaRegistry.register_table!(table)
-        table
-    end
   end
 end

@@ -165,7 +165,9 @@ defmodule Parent.GenServer do
   @doc "Starts the parent process."
   @spec start_link(module, arg :: term, [option]) :: GenServer.on_start()
   def start_link(module, arg, options \\ []) do
-    {parent_opts, gen_server_opts} = Keyword.split(options, ~w/max_restarts max_seconds/a)
+    {parent_opts, gen_server_opts} =
+      Keyword.split(options, ~w/max_restarts max_seconds registry?/a)
+
     GenServer.start_link(__MODULE__, {module, arg, parent_opts}, gen_server_opts)
   end
 

@@ -9,7 +9,8 @@ defmodule Parent.State do
             children: %{pid => child()},
             startup_index: non_neg_integer,
             restart_counter: RestartCounter.t(),
-            shutdown_groups: %{Parent.shutdown_group() => MapSet.t(Parent.child_id())}
+            shutdown_groups: %{Parent.shutdown_group() => MapSet.t(Parent.child_id())},
+            registry?: boolean
           }
 
   @type child :: %{
@@ -26,7 +27,7 @@ defmodule Parent.State do
 
   @spec initialize(Parent.opts()) :: t
   def initialize(opts) do
-    opts = Keyword.merge([max_restarts: 3, max_seconds: 5], opts)
+    opts = Keyword.merge([max_restarts: 3, max_seconds: 5, registry?: false], opts)
 
     %{
       opts: opts,
@@ -34,12 +35,16 @@ defmodule Parent.State do
       children: %{},
       startup_index: 0,
       restart_counter: RestartCounter.new(opts[:max_restarts], opts[:max_seconds]),
-      shutdown_groups: %{}
+      shutdown_groups: %{},
+      registry?: Keyword.fetch!(opts, :registry?)
     }
   end
 
   @spec reinitialize(t) :: t
   def reinitialize(state), do: %{initialize(state.opts) | startup_index: state.startup_index}
+
+  @spec registry?(t) :: boolean
+  def registry?(state), do: state.registry?
 
   @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
   def register_child(state, pid, spec, timer_ref) do
