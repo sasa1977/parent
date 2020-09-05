@@ -89,6 +89,13 @@ defmodule Parent do
 
   @opaque return_info :: [restart: [State.child()], record_restart: State.child() | nil]
 
+  @spec child_spec(child_spec, Keyword.t() | child_spec) :: child_spec
+  def child_spec(spec, overrides \\ []) do
+    spec
+    |> expand_child_spec()
+    |> Map.merge(Map.new(overrides))
+  end
+
   @doc """
   Initializes the state of the parent process.
 
@@ -539,6 +546,7 @@ defmodule Parent do
   defp do_handle_message(_state, _other), do: nil
 
   defp handle_child_down(state, child, reason) do
+    if child.spec.register?, do: ChildRegistry.unregister(child.pid)
     {:ok, children, state} = State.pop_child_with_bound_siblings(state, pid: child.pid)
     bound_siblings = Enum.reject(children, &(&1.spec.id == child.spec.id))
     Enum.each(Enum.reverse(bound_siblings), &stop_child(&1, :shutdown))

@@ -145,6 +145,7 @@ defmodule Parent.GenServer do
   use GenServer
 
   @type state :: term
+  @type option :: Parent.option() | GenServer.option()
 
   @doc """
   Invoked when a child has terminated.
@@ -162,8 +163,7 @@ defmodule Parent.GenServer do
             when new_state: state
 
   @doc "Starts the parent process."
-  @spec start_link(module, arg :: term, [Parent.option() | GenServer.option()]) ::
-          GenServer.on_start()
+  @spec start_link(module, arg :: term, [option]) :: GenServer.on_start()
   def start_link(module, arg, options \\ []) do
     {parent_opts, gen_server_opts} = Keyword.split(options, ~w/max_restarts max_seconds/a)
     GenServer.start_link(__MODULE__, {module, arg, parent_opts}, gen_server_opts)
