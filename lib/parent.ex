@@ -571,6 +571,18 @@ defmodule Parent do
   end
 
   defp return_children(state, return_info) do
+    record_restart = Keyword.get(return_info, :record_restart)
+
+    record_restart =
+      if is_nil(record_restart) or State.child?(state, id: record_restart.spec.id),
+        do: nil,
+        else: record_restart
+
+    children =
+      Enum.reject(Keyword.get(return_info, :children, []), &State.child?(state, &1.spec.id))
+
+    return_info = Keyword.merge(return_info, record_restart: record_restart, children: children)
+
     {record_restart, state} =
       case Keyword.get(return_info, :record_restart) do
         nil -> {nil, state}

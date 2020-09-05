@@ -115,6 +115,31 @@ defmodule Parent.SupervisorTest do
     end
   end
 
+  describe "return_children/1" do
+    test "returns all given children" do
+      pid =
+        start_supervised!(
+          {Supervisor,
+           children: [
+             child_spec(id: :child1, shutdown_group: :group1),
+             child_spec(id: :child2, binds_to: [:child1], shutdown_group: :group2),
+             child_spec(id: :child3, binds_to: [:child2]),
+             child_spec(id: :child4, shutdown_group: :group1),
+             child_spec(id: :child5, shutdown_group: :group2),
+             child_spec(id: :child6)
+           ]}
+        )
+
+      {:ok, %{return_info: return_info}} = Supervisor.shutdown_child(pid, :child4)
+      assert [{:child6, _, _, _}] = :supervisor.which_children(pid)
+
+      assert Supervisor.return_children(pid, return_info) == :ok
+
+      assert Enum.map(:supervisor.which_children(pid), fn {id, _, _, _} -> id end) ==
+               ~w/child1 child2 child3 child4 child5 child6/a
+    end
+  end
+
   test "restarts the child automatically" do
     pid =
       start_supervised!({

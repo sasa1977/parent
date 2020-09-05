@@ -844,7 +844,7 @@ defmodule ParentTest do
     end
   end
 
-  describe "resurrect_child/1" do
+  describe "return_children/1" do
     test "starts all stopped children preserving the shutdown order" do
       Parent.initialize()
       start_child!(id: :child1)
@@ -870,6 +870,15 @@ defmodule ParentTest do
       assert_receive {:DOWN, _mref, :process, pid3, _reason}
 
       assert [pid1, pid2, pid3] == [child3, child2, child1]
+    end
+
+    test "is idempotent" do
+      Parent.initialize()
+      start_child!(id: :child, restart: :temporary, max_restarts: 1)
+      return_info = provoke_child_termination!(:child, at: 0).return_info
+      Parent.return_children(return_info)
+      Parent.return_children(return_info)
+      assert [%{id: :child}] = Parent.children()
     end
 
     test "records restart of a terminated child" do
