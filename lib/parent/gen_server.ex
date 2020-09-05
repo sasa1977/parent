@@ -230,6 +230,9 @@ defmodule Parent.GenServer do
   def handle_call(:count_children, _from, state),
     do: {:reply, Parent.supervisor_count_children(), state}
 
+  def handle_call({:get_childspec, child_id_or_pid}, _from, state),
+    do: {:reply, Parent.supervisor_get_childspec(child_id_or_pid), state}
+
   def handle_call(message, from, state), do: invoke_callback(:handle_call, [message, from, state])
 
   @impl GenServer

@@ -749,8 +749,15 @@ defmodule ParentTest do
 
           assert :supervisor.count_children(parent) ==
                    [active: 1, specs: 1, supervisors: 0, workers: 1]
+
+          assert {:ok, %{id: :child}} = :supervisor.get_childspec(parent, :child)
+          assert {:ok, %{id: :child}} = :supervisor.get_childspec(parent, child)
+          assert :supervisor.get_childspec(parent, :unknown_child) == {:error, :not_found}
         end)
 
+      assert handle_parent_message() == :ignore
+      assert handle_parent_message() == :ignore
+      assert handle_parent_message() == :ignore
       assert handle_parent_message() == :ignore
       assert handle_parent_message() == :ignore
 

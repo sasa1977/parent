@@ -346,6 +346,23 @@ defmodule Parent do
     |> Map.to_list()
   end
 
+  @doc """
+  Should be invoked by the behaviour when handling `:get_childspec` GenServer call.
+
+  See `:supervisor.get_childspec/2` for details.
+  """
+  @spec supervisor_get_childspec(child_id | pid) :: {:ok, child_spec} | {:error, :not_found}
+  def supervisor_get_childspec(child_id_or_pid) do
+    search_res =
+      with :error <- State.child(state(), id: child_id_or_pid),
+           do: State.child(state(), pid: child_id_or_pid)
+
+    case search_res do
+      {:ok, child} -> {:ok, child.spec}
+      :error -> {:error, :not_found}
+    end
+  end
+
   @doc "Returns the count of running child processes."
   @spec num_children() :: non_neg_integer
   def num_children(), do: State.num_children(state())
@@ -462,6 +479,11 @@ defmodule Parent do
 
   defp do_handle_message(state, {:"$gen_call", client, :count_children}) do
     GenServer.reply(client, supervisor_count_children())
+    {:ignore, state}
+  end
+
+  defp do_handle_message(state, {:"$gen_call", client, {:get_childspec, child_id_or_pid}}) do
+    GenServer.reply(client, supervisor_get_childspec(child_id_or_pid))
     {:ignore, state}
   end
 
