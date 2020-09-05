@@ -1,7 +1,9 @@
 defmodule Parent.Supervisor do
   use Parent.GenServer
 
-  @type option :: [Parent.GenServer.option() | {:children, [Parent.child_spec()]}]
+  @type option ::
+          Parent.GenServer.option()
+          | {:children, [Parent.child_spec() | module | {module, term}]}
 
   @spec start_link([option]) :: GenServer.on_start()
   def start_link(options) do
@@ -17,16 +19,17 @@ defmodule Parent.Supervisor do
   def child_meta(supervisor, child_id),
     do: GenServer.call(supervisor, {:child_meta, child_id})
 
-  @spec start_child(GenServer.server(), Parent.child_spec()) :: Supervisor.on_start_child()
+  @spec start_child(GenServer.server(), Parent.child_spec() | module | {module, term}) ::
+          Supervisor.on_start_child()
   def start_child(supervisor, child_spec),
     do: GenServer.call(supervisor, {:start_child, child_spec}, :infinity)
 
-  @spec shutdown_child(GenServer.server(), Parent.child_spec()) ::
+  @spec shutdown_child(GenServer.server(), Parent.child_id()) ::
           {:ok, Parent.on_shutdown_child()} | {:error, :unknown_child}
   def shutdown_child(supervisor, child_id),
     do: GenServer.call(supervisor, {:shutdown_child, child_id})
 
-  @spec restart_child(GenServer.server(), Parent.child_spec()) :: :ok | {:error, :unknown_child}
+  @spec restart_child(GenServer.server(), Parent.child_id()) :: :ok | {:error, :unknown_child}
   def restart_child(supervisor, child_id),
     do: GenServer.call(supervisor, {:restart_child, child_id})
 
