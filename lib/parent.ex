@@ -87,6 +87,7 @@ defmodule Parent do
           also_restarted: [child_id]
         }
 
+  @type on_shutdown_child :: %{terminated_children: [child_id], return_info: return_info}
   @opaque return_info :: [restart: [State.child()], record_restart: State.child() | nil]
 
   @spec child_spec(child_spec, Keyword.t() | child_spec) :: child_spec
@@ -231,10 +232,7 @@ defmodule Parent do
   Permanent and transient children won't be restarted, and their specifications won't be preserved.
   In other words, this function completely removes the child and all other children bound to it.
   """
-  @spec shutdown_child(child_id) :: %{
-          terminated_children: [child_id],
-          return_info: return_info
-        }
+  @spec shutdown_child(child_id) :: on_shutdown_child()
   def shutdown_child(child_id) do
     case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
