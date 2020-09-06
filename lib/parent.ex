@@ -64,7 +64,9 @@ defmodule Parent do
 
   @type start :: (() -> Supervisor.on_start_child()) | {module, atom, [term]}
 
-  @type shutdown :: non_neg_integer() | :infinity | :brutal_kill
+  @type shutdown :: non_neg_integer | :infinity | :brutal_kill
+
+  @type start_spec :: child_spec | module | {module, term}
 
   @type child :: %{id: child_id, pid: pid, meta: child_meta}
 
@@ -117,7 +119,7 @@ defmodule Parent do
   def initialized?(), do: not is_nil(Process.get(__MODULE__))
 
   @doc "Starts the child described by the specification."
-  @spec start_child(child_spec | module | {module, term}) :: Supervisor.on_start_child()
+  @spec start_child(start_spec) :: Supervisor.on_start_child()
   def start_child(child_spec) do
     state = state()
     child_spec = expand_child_spec(child_spec)

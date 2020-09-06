@@ -5,8 +5,7 @@ defmodule Parent.Client do
   @spec child_meta(GenServer.server(), Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
   def child_meta(parent, child_id), do: call(parent, {:child_meta, child_id})
 
-  @spec start_child(GenServer.server(), Parent.child_spec() | module | {module, term}) ::
-          Supervisor.on_start_child()
+  @spec start_child(GenServer.server(), Parent.start_spec()) :: Supervisor.on_start_child()
   def start_child(parent, child_spec), do: call(parent, {:start_child, child_spec}, :infinity)
 
   @spec shutdown_child(GenServer.server(), Parent.child_id()) ::

@@ -1,4 +1,5 @@
 defmodule Parent.Application do
+  @moduledoc false
   use Application
 
   @impl Application
