@@ -13,8 +13,8 @@ defmodule Parent.ChildRegistry do
     )
   end
 
-  @spec whereis_child(GenServer.server(), Parent.child_id()) :: pid | nil
-  def whereis_child(parent, child_id) do
+  @spec child_pid(GenServer.server(), Parent.child_id()) :: pid | nil
+  def child_pid(parent, child_id) do
     with parent_pid when not is_nil(parent_pid) <- GenServer.whereis(parent),
          {:ok, table} <- MetaRegistry.table(parent_pid),
          [[pid]] <- :ets.match(table, {{:id, child_id}, :"$1"}) do
@@ -24,8 +24,8 @@ defmodule Parent.ChildRegistry do
     end
   end
 
-  @spec children_in_role(GenServer.server(), Parent.child_role()) :: [pid]
-  def children_in_role(parent, child_role) do
+  @spec child_pids(GenServer.server(), Parent.child_role()) :: [pid]
+  def child_pids(parent, child_role) do
     with parent_pid when not is_nil(parent_pid) <- GenServer.whereis(parent),
          {:ok, table} <- MetaRegistry.table(parent_pid),
          rows <- :ets.match(table, {{:role, child_role}, :"$1"}) do

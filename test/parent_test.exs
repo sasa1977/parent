@@ -785,70 +785,6 @@ defmodule ParentTest do
     end
   end
 
-  describe "whereis_child/2" do
-    test "finds registered children by id" do
-      Parent.initialize(registry?: true)
-      child1 = start_child!(id: :child1)
-      child2 = start_child!(id: :child2)
-
-      assert Parent.whereis_child(self(), :child1) == child1
-      assert Parent.whereis_child(self(), :child2) == child2
-
-      assert GenServer.whereis({:via, Parent, {self(), :child1}}) == child1
-      assert GenServer.whereis({:via, Parent, {self(), :child2}}) == child2
-    end
-
-    test "finds registered children by roles" do
-      Parent.initialize(registry?: true)
-      child1 = start_child!(roles: [:foo, :bar])
-      child2 = start_child!(roles: [:foo])
-      start_child!(roles: [])
-      start_child!()
-
-      assert Parent.children_in_role(self(), :foo) == [child1, child2]
-      assert Parent.children_in_role(self(), :bar) == [child1]
-    end
-
-    test "finds the child inside its parent" do
-      {parent1, [parent1_child]} = start_parent([[id: :child]], registry?: true)
-      {parent2, [parent2_child]} = start_parent([[id: :child]], registry?: true)
-
-      assert Parent.whereis_child(parent1, :child) == parent1_child
-      assert Parent.whereis_child(parent2, :child) == parent2_child
-    end
-
-    test "can dereference aliases" do
-      Parent.initialize(registry?: true)
-      child1 = start_child!(id: :child1)
-
-      registered_name = :"alias_#{System.unique_integer([:positive, :monotonic])}"
-      Process.register(self(), registered_name)
-      :global.register_name(registered_name, self())
-
-      assert Parent.whereis_child(registered_name, :child1) == child1
-      assert Parent.whereis_child({:global, registered_name}, :child1) == child1
-      assert Parent.whereis_child({:via, :global, registered_name}, :child1) == child1
-    end
-
-    test "removes registered child after it terminates" do
-      Parent.initialize(registry?: true)
-      start_child!(id: :child, roles: [:foo, :bar])
-      Parent.shutdown_child(:child)
-
-      assert is_nil(Parent.whereis_child(self(), :child))
-      assert :ets.tab2list(Parent.MetaRegistry.table!(self())) == []
-    end
-
-    test "removes registered children after the parent terminates" do
-      {parent, _children} = start_parent([[id: :child1], [id: :child2]])
-      Process.monitor(parent)
-      Process.exit(parent, :kill)
-      assert_receive {:DOWN, _mref, :process, ^parent, _}
-      assert is_nil(Parent.whereis_child(self(), :child1))
-      assert is_nil(Parent.whereis_child(self(), :child2))
-    end
-  end
-
   describe "return_children/1" do
     test "starts all stopped children preserving the shutdown order" do
       Parent.initialize()
@@ -963,29 +899,4 @@ defmodule ParentTest do
 
   def succeed_on_child_start(id), do: :ets.insert(__MODULE__, {id, false})
   def raise_on_child_start(id), do: :ets.insert(__MODULE__, {id, true})
-
-  defp start_parent(child_specs, parent_opts \\ []) do
-    test_pid = self()
-
-    parent_pid =
-      start_supervised!(
-        Supervisor.child_spec(
-          {Task,
-           fn ->
-             Parent.initialize(parent_opts)
-             children = Enum.map(child_specs, &start_child!/1)
-             send(test_pid, children)
-
-             receive do
-               _ -> :ok
-             end
-           end},
-          id: make_ref()
-        )
-      )
-
-    assert_receive children
-
-    {parent_pid, children}
-  end
 end

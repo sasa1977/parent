@@ -162,33 +162,6 @@ defmodule Parent do
   end
 
   @doc """
-  Returns the pid of the child of the given parent, or nil if such child or parent doesn't exist.
-
-  This function only works for parent processes which are initialized with the `registry?: true`
-  option.
-
-  This function can be invoked outside of the parent process.
-  """
-  @spec whereis_child(GenServer.server(), child_id) :: pid | nil
-  defdelegate whereis_child(parent, child_id), to: ChildRegistry
-
-  @doc false
-  def whereis_name({parent, child_id}) do
-    with nil <- whereis_child(parent, child_id), do: :undefined
-  end
-
-  @doc """
-  Returns all the pids of the children of the given parent who are in the given role.
-
-  This function only works for parent processes which are initialized with the `registry?: true`
-  option.
-
-  This function can be invoked outside of the parent process.
-  """
-  @spec children_in_role(GenServer.server(), child_role) :: [pid]
-  defdelegate children_in_role(parent, child_role), to: ChildRegistry
-
-  @doc """
   Restarts the child.
 
   This function will also restart all non-temporary siblings and shut down all temporary siblings

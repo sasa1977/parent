@@ -133,7 +133,7 @@ defmodule Parent.SupervisorTest do
   describe "restart_child/1" do
     test "stops the given child" do
       pid = start_supervisor!(children: [child_spec(id: :child)])
-      pid1 = Parent.whereis_child(pid, :child)
+      pid1 = Child.pid(pid, :child)
       assert Supervisor.restart_child(pid, :child) == :ok
       assert {:ok, pid2} = Supervisor.child_pid(pid, :child)
       refute pid2 == pid1
