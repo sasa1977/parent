@@ -365,7 +365,7 @@ defmodule Parent do
          do: store(new_state)
   end
 
-  defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, nil})
+  defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, []})
   defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
 
   defp expand_child_spec(%{} = child_spec) do
