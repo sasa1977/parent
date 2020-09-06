@@ -41,6 +41,14 @@ defmodule Parent.Supervisor do
   def return_children(supervisor, return_info),
     do: GenServer.call(supervisor, {:return_children, return_info})
 
+  @spec update_child_meta(
+          GenServer.server(),
+          Parent.child_id(),
+          (Parent.child_meta() -> Parent.child_meta())
+        ) :: :ok | :error
+  def update_child_meta(supervisor, child_id, updater),
+    do: GenServer.call(supervisor, {:update_child_meta, child_id, updater})
+
   @impl GenServer
   def init(children) do
     Parent.start_all_children!(children)
@@ -80,6 +88,9 @@ defmodule Parent.Supervisor do
 
   def handle_call({:return_children, return_info}, _call, state),
     do: {:reply, Parent.return_children(return_info), state}
+
+  def handle_call({:update_child_meta, child_id, updater}, _call, state),
+    do: {:reply, Parent.update_child_meta(child_id, updater), state}
 
   @spec child_spec([option]) :: Parent.child_spec()
 end

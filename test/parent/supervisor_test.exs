@@ -77,6 +77,19 @@ defmodule Parent.SupervisorTest do
     end
   end
 
+  describe "update_child_meta/1" do
+    test "succeeds if child exists" do
+      supervisor = start_supervisor!(children: [child_spec(id: :child, meta: 1)])
+      assert Supervisor.update_child_meta(supervisor, :child, &(&1 + 1))
+      assert Supervisor.child_meta(supervisor, :child) == {:ok, 2}
+    end
+
+    test "returns error when child is unknown" do
+      supervisor = start_supervisor!()
+      assert Supervisor.update_child_meta(supervisor, :child, & &1) == :error
+    end
+  end
+
   describe "start_child/1" do
     test "adds the additional child" do
       supervisor = start_supervisor!(children: [child_spec(id: :child1)])
