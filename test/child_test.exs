@@ -5,35 +5,30 @@ defmodule ChildTest do
   describe "pid/2" do
     test "finds registered children by id" do
       parent = start_supervisor!(children: [child_spec(id: :child1), child_spec(id: :child2)])
-      children_pids = children_pids(parent)
 
-      assert Child.pid(parent, :child1) == children_pids.child1
-      assert Child.pid(parent, :child2) == children_pids.child2
+      assert Child.pid(parent, :child1) == child_pid!(parent, :child1)
+      assert Child.pid(parent, :child2) == child_pid!(parent, :child2)
 
-      assert GenServer.whereis({:via, Child, {parent, :child1}}) == children_pids.child1
-      assert GenServer.whereis({:via, Child, {parent, :child2}}) == children_pids.child2
+      assert GenServer.whereis({:via, Child, {parent, :child1}}) == child_pid!(parent, :child1)
+      assert GenServer.whereis({:via, Child, {parent, :child2}}) == child_pid!(parent, :child2)
     end
 
     test "finds the child inside its parent" do
       parent1 = start_supervisor!(children: [child_spec(id: :child)])
       parent2 = start_supervisor!(children: [child_spec(id: :child)])
 
-      children_pids1 = children_pids(parent1)
-      children_pids2 = children_pids(parent2)
-
-      assert Child.pid(parent1, :child) == children_pids1.child
-      assert Child.pid(parent2, :child) == children_pids2.child
+      assert Child.pid(parent1, :child) == child_pid!(parent1, :child)
+      assert Child.pid(parent2, :child) == child_pid!(parent2, :child)
     end
 
     test "can dereference aliases" do
       registered_name = :"alias_#{System.unique_integer([:positive, :monotonic])}"
       parent = start_supervisor!(children: [child_spec(id: :child)], name: registered_name)
       :global.register_name(registered_name, parent)
-      children_pids = children_pids(parent)
 
-      assert Child.pid(registered_name, :child) == children_pids.child
-      assert Child.pid({:global, registered_name}, :child) == children_pids.child
-      assert Child.pid({:via, :global, registered_name}, :child) == children_pids.child
+      assert Child.pid(registered_name, :child) == child_pid!(parent, :child)
+      assert Child.pid({:global, registered_name}, :child) == child_pid!(parent, :child)
+      assert Child.pid({:via, :global, registered_name}, :child) == child_pid!(parent, :child)
     end
 
     test "removes terminated child" do
@@ -47,7 +42,7 @@ defmodule ChildTest do
     test "discovers the child after restart" do
       parent = start_supervisor!(children: [child_spec(id: :child)])
       Supervisor.restart_child(parent, :child)
-      assert Child.pid(parent, :child) == children_pids(parent).child
+      assert Child.pid(parent, :child) == child_pid!(parent, :child)
     end
   end
 
@@ -61,21 +56,26 @@ defmodule ChildTest do
           ]
         )
 
-      children_pids = children_pids(parent)
+      assert Child.pids(parent, :foo) == [
+               child_pid!(parent, :child1),
+               child_pid!(parent, :child2)
+             ]
 
-      assert Child.pids(parent, :foo) == [children_pids.child1, children_pids.child2]
-      assert Child.pids(parent, :bar) == [children_pids.child1]
+      assert Child.pids(parent, :bar) == [child_pid!(parent, :child1)]
     end
   end
 
   describe "sibling/1" do
     test "returns the pid of the sibling or nil if the sibling doesn't exist" do
       parent = start_supervisor!(children: [child_spec(id: :child1), child_spec(id: :child2)])
-      %{child1: child1, child2: child2} = children_pids(parent)
 
-      assert Agent.get(child1, fn _ -> Child.sibling(:child2) end) == child2
-      assert Agent.get(child2, fn _ -> Child.sibling(:child1) end) == child1
-      assert Agent.get(child1, fn _ -> Child.sibling(:child3) end) == nil
+      assert Agent.get(child_pid!(parent, :child1), fn _ -> Child.sibling(:child2) end) ==
+               child_pid!(parent, :child2)
+
+      assert Agent.get(child_pid!(parent, :child2), fn _ -> Child.sibling(:child1) end) ==
+               child_pid!(parent, :child1)
+
+      assert Agent.get(child_pid!(parent, :child1), fn _ -> Child.sibling(:child3) end) == nil
     end
 
     test "raises if parent is not registry" do
@@ -93,11 +93,9 @@ defmodule ChildTest do
     pid
   end
 
-  defp children_pids(parent) do
-    parent
-    |> :supervisor.which_children()
-    |> Stream.map(fn {child_id, pid, _, _} -> {child_id, pid} end)
-    |> Map.new()
+  defp child_pid!(parent, child_id) do
+    {:ok, pid} = Supervisor.child_pid(parent, child_id)
+    pid
   end
 
   defp child_spec(overrides),

@@ -43,21 +43,23 @@ defmodule Parent.SupervisorTest do
 
   describe "child_pid/1" do
     test "returns the pid of the given child" do
-      pid = start_supervisor!(children: [child_spec(id: :child1), child_spec(id: :child2)])
-      assert {:ok, pid1} = Supervisor.child_pid(pid, :child1)
-      assert {:ok, pid2} = Supervisor.child_pid(pid, :child1)
-      assert [{:child1, pid1, _, _}, {:child2, pid2, _, _}] = :supervisor.which_children(pid)
+      supervisor = start_supervisor!(children: [child_spec(id: :child1), child_spec(id: :child2)])
+      assert {:ok, pid1} = Supervisor.child_pid(supervisor, :child1)
+      assert {:ok, pid2} = Supervisor.child_pid(supervisor, :child1)
+
+      assert [{:child1, pid1, _, _}, {:child2, pid2, _, _}] =
+               :supervisor.which_children(supervisor)
     end
 
     test "returns error when child is unknown" do
-      pid = start_supervisor!()
-      assert Supervisor.child_pid(pid, :child) == :error
+      supervisor = start_supervisor!()
+      assert Supervisor.child_pid(supervisor, :child) == :error
     end
   end
 
   describe "child_meta/1" do
     test "returns the meta of the given child" do
-      pid =
+      supervisor =
         start_supervisor!(
           children: [
             child_spec(id: :child1, meta: :meta1),
@@ -65,79 +67,79 @@ defmodule Parent.SupervisorTest do
           ]
         )
 
-      assert Supervisor.child_meta(pid, :child1) == {:ok, :meta1}
-      assert Supervisor.child_meta(pid, :child2) == {:ok, :meta2}
+      assert Supervisor.child_meta(supervisor, :child1) == {:ok, :meta1}
+      assert Supervisor.child_meta(supervisor, :child2) == {:ok, :meta2}
     end
 
     test "returns error when child is unknown" do
-      pid = start_supervisor!()
-      assert Supervisor.child_meta(pid, :child) == :error
+      supervisor = start_supervisor!()
+      assert Supervisor.child_meta(supervisor, :child) == :error
     end
   end
 
   describe "start_child/1" do
     test "adds the additional child" do
-      pid = start_supervisor!(children: [child_spec(id: :child1)])
-      assert {:ok, child2} = Supervisor.start_child(pid, child_spec(id: :child2))
-      assert [{:child1, _pid1, _, _}, {:child2, ^child2, _, _}] = :supervisor.which_children(pid)
+      supervisor = start_supervisor!(children: [child_spec(id: :child1)])
+      assert {:ok, child2} = Supervisor.start_child(supervisor, child_spec(id: :child2))
+      assert child_pid!(supervisor, :child2) == child2
     end
 
     test "returns error" do
-      pid = start_supervisor!(children: [child_spec(id: :child1)])
-      {:ok, child2} = Supervisor.start_child(pid, child_spec(id: :child2))
+      supervisor = start_supervisor!(children: [child_spec(id: :child1)])
+      {:ok, child2} = Supervisor.start_child(supervisor, child_spec(id: :child2))
 
-      assert Supervisor.start_child(pid, child_spec(id: :child2)) ==
+      assert Supervisor.start_child(supervisor, child_spec(id: :child2)) ==
                {:error, {:already_started, child2}}
 
-      assert [{:child1, _pid1, _, _}, {:child2, ^child2, _, _}] = :supervisor.which_children(pid)
+      assert child_ids(supervisor) == [:child1, :child2]
+      assert child_pid!(supervisor, :child2) == child2
     end
 
     test "handles child start crash" do
-      pid = start_supervisor!(children: [child_spec(id: :child1)])
+      supervisor = start_supervisor!(children: [child_spec(id: :child1)])
 
       capture_log(fn ->
         spec =
           child_spec(id: :child2, start: {Agent, :start_link, [fn -> raise "some error" end]})
 
-        assert {:error, {error, _stacktrace}} = Supervisor.start_child(pid, spec)
+        assert {:error, {error, _stacktrace}} = Supervisor.start_child(supervisor, spec)
         Process.sleep(100)
       end)
 
-      assert [{:child1, _pid1, _, _}] = :supervisor.which_children(pid)
+      assert child_ids(supervisor) == [:child1]
     end
 
     test "handles :ignore" do
-      pid = start_supervisor!(children: [child_spec(id: :child1)])
+      supervisor = start_supervisor!(children: [child_spec(id: :child1)])
 
-      assert Supervisor.start_child(pid, child_spec(id: :child2, start: fn -> :ignore end)) ==
+      assert Supervisor.start_child(supervisor, child_spec(id: :child2, start: fn -> :ignore end)) ==
                {:ok, :undefined}
 
-      assert [{:child1, _pid1, _, _}] = :supervisor.which_children(pid)
+      assert child_ids(supervisor) == [:child1]
     end
   end
 
   describe "shutdown_child/1" do
     test "stops the given child" do
-      pid = start_supervisor!(children: [child_spec(id: :child)])
-      assert {:ok, _info} = Supervisor.shutdown_child(pid, :child)
-      assert Supervisor.child_pid(pid, :child) == :error
-      assert :supervisor.which_children(pid) == []
+      supervisor = start_supervisor!(children: [child_spec(id: :child)])
+      assert {:ok, _info} = Supervisor.shutdown_child(supervisor, :child)
+      assert Supervisor.child_pid(supervisor, :child) == :error
+      assert child_ids(supervisor) == []
     end
 
     test "returns error when child is unknown" do
-      pid = start_supervisor!()
-      assert Supervisor.shutdown_child(pid, :child) == {:error, :unknown_child}
+      supervisor = start_supervisor!()
+      assert Supervisor.shutdown_child(supervisor, :child) == {:error, :unknown_child}
     end
   end
 
   describe "restart_child/1" do
     test "stops the given child" do
-      pid = start_supervisor!(children: [child_spec(id: :child)])
-      pid1 = Child.pid(pid, :child)
-      assert Supervisor.restart_child(pid, :child) == :ok
-      assert {:ok, pid2} = Supervisor.child_pid(pid, :child)
-      refute pid2 == pid1
-      assert [{:child, _, _, _}] = :supervisor.which_children(pid)
+      supervisor = start_supervisor!(children: [child_spec(id: :child)])
+      pid1 = child_pid!(supervisor, :child)
+      assert Supervisor.restart_child(supervisor, :child) == :ok
+      assert child_ids(supervisor) == [:child]
+      refute child_pid!(supervisor, :child) == pid1
     end
 
     test "returns error when child is unknown" do
@@ -148,18 +150,15 @@ defmodule Parent.SupervisorTest do
 
   describe "shutdown_all/1" do
     test "stops all children" do
-      pid = start_supervisor!(children: [child_spec(id: :child1), child_spec(id: :child2)])
-
-      assert Supervisor.shutdown_all(pid) == :ok
-      assert Supervisor.child_pid(pid, :child1) == :error
-      assert Supervisor.child_pid(pid, :child2) == :error
-      assert :supervisor.which_children(pid) == []
+      supervisor = start_supervisor!(children: [child_spec(id: :child1), child_spec(id: :child2)])
+      assert Supervisor.shutdown_all(supervisor) == :ok
+      assert child_ids(supervisor) == []
     end
   end
 
   describe "return_children/1" do
     test "returns all given children" do
-      pid =
+      supervisor =
         start_supervisor!(
           children: [
             child_spec(id: :child1, shutdown_group: :group1),
@@ -171,28 +170,23 @@ defmodule Parent.SupervisorTest do
           ]
         )
 
-      {:ok, %{return_info: return_info}} = Supervisor.shutdown_child(pid, :child4)
-      assert [{:child6, _, _, _}] = :supervisor.which_children(pid)
+      {:ok, %{return_info: return_info}} = Supervisor.shutdown_child(supervisor, :child4)
+      assert child_ids(supervisor) == [:child6]
 
-      assert Supervisor.return_children(pid, return_info) == :ok
-
-      assert Enum.map(:supervisor.which_children(pid), fn {id, _, _, _} -> id end) ==
-               ~w/child1 child2 child3 child4 child5 child6/a
+      assert Supervisor.return_children(supervisor, return_info) == :ok
+      assert child_ids(supervisor) == ~w/child1 child2 child3 child4 child5 child6/a
     end
   end
 
   test "restarts the child automatically" do
-    pid = start_supervisor!(name: :my_supervisor, children: [child_spec(id: :child1)])
+    supervisor = start_supervisor!(name: :my_supervisor, children: [child_spec(id: :child)])
 
-    :erlang.trace(pid, true, [:call])
+    :erlang.trace(supervisor, true, [:call])
     :erlang.trace_pattern({Parent, :return_children, 2}, [], [:local])
+    Agent.stop(child_pid!(supervisor, :child))
+    assert_receive {:trace, ^supervisor, :call, {Parent, :return_children, _args}}
 
-    {:ok, pid1} = Supervisor.child_pid(pid, :child1)
-    Agent.stop(pid1)
-
-    assert_receive {:trace, ^pid, :call, {Parent, :return_children, _args}}
-    assert {:ok, pid2} = Supervisor.child_pid(pid, :child1)
-    refute pid2 == pid1
+    assert child_ids(supervisor) == [:child]
   end
 
   defp start_supervisor!(opts \\ []) do
@@ -203,4 +197,15 @@ defmodule Parent.SupervisorTest do
 
   defp child_spec(overrides),
     do: Parent.child_spec(%{start: {Agent, :start_link, [fn -> :ok end]}}, overrides)
+
+  defp child_pid!(supervisor, child_id) do
+    {:ok, pid} = Supervisor.child_pid(supervisor, child_id)
+    pid
+  end
+
+  defp child_ids(supervisor) do
+    supervisor
+    |> :supervisor.which_children()
+    |> Enum.map(fn {child_id, _, _, _} -> child_id end)
+  end
 end
