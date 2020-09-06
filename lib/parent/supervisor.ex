@@ -11,44 +11,6 @@ defmodule Parent.Supervisor do
     Parent.GenServer.start_link(__MODULE__, children, options)
   end
 
-  @spec child_pid(GenServer.server(), Parent.child_id()) :: {:ok, pid} | :error
-  def child_pid(supervisor, child_id),
-    do: GenServer.call(supervisor, {:child_pid, child_id})
-
-  @spec child_meta(GenServer.server(), Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
-  def child_meta(supervisor, child_id),
-    do: GenServer.call(supervisor, {:child_meta, child_id})
-
-  @spec start_child(GenServer.server(), Parent.child_spec() | module | {module, term}) ::
-          Supervisor.on_start_child()
-  def start_child(supervisor, child_spec),
-    do: GenServer.call(supervisor, {:start_child, child_spec}, :infinity)
-
-  @spec shutdown_child(GenServer.server(), Parent.child_id()) ::
-          {:ok, Parent.on_shutdown_child()} | {:error, :unknown_child}
-  def shutdown_child(supervisor, child_id),
-    do: GenServer.call(supervisor, {:shutdown_child, child_id})
-
-  @spec restart_child(GenServer.server(), Parent.child_id()) :: :ok | {:error, :unknown_child}
-  def restart_child(supervisor, child_id),
-    do: GenServer.call(supervisor, {:restart_child, child_id})
-
-  @spec shutdown_all(GenServer.server()) :: :ok
-  def shutdown_all(supervisor),
-    do: GenServer.call(supervisor, :shutdown_all)
-
-  @spec return_children(GenServer.server(), Parent.return_info()) :: :ok
-  def return_children(supervisor, return_info),
-    do: GenServer.call(supervisor, {:return_children, return_info})
-
-  @spec update_child_meta(
-          GenServer.server(),
-          Parent.child_id(),
-          (Parent.child_meta() -> Parent.child_meta())
-        ) :: :ok | :error
-  def update_child_meta(supervisor, child_id, updater),
-    do: GenServer.call(supervisor, {:update_child_meta, child_id, updater})
-
   @impl GenServer
   def init(children) do
     Parent.start_all_children!(children)

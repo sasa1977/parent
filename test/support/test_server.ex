@@ -25,5 +25,6 @@ defmodule Parent.TestServer do
   def handle_cast(fun, state), do: {:noreply, fun.(state)}
 
   @impl GenServer
-  def handle_info(fun, state), do: {:noreply, fun.(state)}
+  def handle_info(fun, state) when is_function(fun), do: {:noreply, fun.(state)}
+  def handle_info(_other, state), do: {:noreply, state}
 end

@@ -1,6 +1,6 @@
 defmodule ChildTest do
   use ExUnit.Case, async: true
-  alias Parent.Supervisor
+  alias Parent.{Client, Supervisor}
 
   describe "pid/2" do
     test "finds registered children by id" do
@@ -33,7 +33,7 @@ defmodule ChildTest do
 
     test "removes terminated child" do
       parent = start_supervisor!(children: [child_spec(id: :child)])
-      Supervisor.shutdown_child(parent, :child)
+      Client.shutdown_child(parent, :child)
 
       assert is_nil(Child.pid(parent, :child))
       assert :ets.tab2list(Parent.MetaRegistry.table!(parent)) == []
@@ -41,7 +41,7 @@ defmodule ChildTest do
 
     test "discovers the child after restart" do
       parent = start_supervisor!(children: [child_spec(id: :child)])
-      Supervisor.restart_child(parent, :child)
+      Client.restart_child(parent, :child)
       assert Child.pid(parent, :child) == child_pid!(parent, :child)
     end
   end
@@ -94,7 +94,7 @@ defmodule ChildTest do
   end
 
   defp child_pid!(parent, child_id) do
-    {:ok, pid} = Supervisor.child_pid(parent, child_id)
+    {:ok, pid} = Client.child_pid(parent, child_id)
     pid
   end
 

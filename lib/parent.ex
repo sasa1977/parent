@@ -257,6 +257,11 @@ defmodule Parent do
   Note that you don't need to invoke this function in a `Parent.GenServer` callback module.
   """
   @spec handle_message(term) :: handle_message_response() | nil
+  def handle_message({:"$parent_call", client, {Parent.Client, message}}) do
+    GenServer.reply(client, Parent.Client.handle_request(message))
+    :ignore
+  end
+
   def handle_message(message) do
     with {result, state} <- do_handle_message(state(), message) do
       store(state)
