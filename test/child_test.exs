@@ -43,6 +43,12 @@ defmodule ChildTest do
       assert is_nil(Child.pid(parent, :child))
       assert :ets.tab2list(Parent.MetaRegistry.table!(parent)) == []
     end
+
+    test "discovers the child after restart" do
+      parent = start_supervisor!(children: [child_spec(id: :child)])
+      Supervisor.restart_child(parent, :child)
+      assert Child.pid(parent, :child) == children_pids(parent).child
+    end
   end
 
   describe "pids/2" do
@@ -59,6 +65,24 @@ defmodule ChildTest do
 
       assert Child.pids(parent, :foo) == [children_pids.child1, children_pids.child2]
       assert Child.pids(parent, :bar) == [children_pids.child1]
+    end
+  end
+
+  describe "sibling/1" do
+    test "returns the pid of the sibling or nil if the sibling doesn't exist" do
+      parent = start_supervisor!(children: [child_spec(id: :child1), child_spec(id: :child2)])
+      %{child1: child1, child2: child2} = children_pids(parent)
+
+      assert Agent.get(child1, fn _ -> Child.sibling(:child2) end) == child2
+      assert Agent.get(child2, fn _ -> Child.sibling(:child1) end) == child1
+      assert Agent.get(child1, fn _ -> Child.sibling(:child3) end) == nil
+    end
+
+    test "raises if parent is not registry" do
+      Task.async(fn ->
+        assert_raise RuntimeError, "Parent is not a registry", fn -> Child.sibling(:sibling) end
+      end)
+      |> Task.await()
     end
   end
 
