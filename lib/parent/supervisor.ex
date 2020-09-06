@@ -7,7 +7,7 @@ defmodule Parent.Supervisor do
 
   @spec start_link([option]) :: GenServer.on_start()
   def start_link(options) do
-    {children, options} = Keyword.pop!(options, :children)
+    {children, options} = Keyword.pop(options, :children, [])
     Parent.GenServer.start_link(__MODULE__, children, options)
   end
 

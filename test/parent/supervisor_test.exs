@@ -50,7 +50,7 @@ defmodule Parent.SupervisorTest do
     end
 
     test "returns error when child is unknown" do
-      pid = start_supervisor!(children: [])
+      pid = start_supervisor!()
       assert Supervisor.child_pid(pid, :child) == :error
     end
   end
@@ -70,7 +70,7 @@ defmodule Parent.SupervisorTest do
     end
 
     test "returns error when child is unknown" do
-      pid = start_supervisor!(children: [])
+      pid = start_supervisor!()
       assert Supervisor.child_meta(pid, :child) == :error
     end
   end
@@ -125,7 +125,7 @@ defmodule Parent.SupervisorTest do
     end
 
     test "returns error when child is unknown" do
-      pid = start_supervisor!(children: [])
+      pid = start_supervisor!()
       assert Supervisor.shutdown_child(pid, :child) == {:error, :unknown_child}
     end
   end
@@ -141,7 +141,7 @@ defmodule Parent.SupervisorTest do
     end
 
     test "returns error when child is unknown" do
-      pid = start_supervisor!(children: [])
+      pid = start_supervisor!()
       assert Supervisor.restart_child(pid, :child) == {:error, :unknown_child}
     end
   end
@@ -195,7 +195,7 @@ defmodule Parent.SupervisorTest do
     refute pid2 == pid1
   end
 
-  defp start_supervisor!(opts) do
+  defp start_supervisor!(opts \\ []) do
     pid = start_supervised!({Supervisor, opts})
     Mox.allow(Parent.RestartCounter.TimeProvider.Test, self(), pid)
     pid
