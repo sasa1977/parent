@@ -171,36 +171,6 @@ defmodule Parent.GenServer do
     GenServer.start_link(__MODULE__, {module, arg, parent_opts}, gen_server_opts)
   end
 
-  @deprecated "Use Parent.start_child/1 instead"
-  defdelegate start_child(child_spec), to: Parent
-
-  @deprecated "Use Parent.shutdown_child/1 instead"
-  defdelegate shutdown_child(child_id), to: Parent
-
-  @deprecated "Use Parent.shutdown_all/1 instead"
-  defdelegate shutdown_all(reason \\ :shutdown), to: Parent
-
-  @deprecated "Use Parent.children/0 instead"
-  defdelegate children(), to: Parent
-
-  @deprecated "Use Parent.num_children/0 instead"
-  defdelegate num_children(), to: Parent
-
-  @deprecated "Use Parent.child_id/1 instead"
-  defdelegate child_id(pid), to: Parent
-
-  @deprecated "Use Parent.child_pid/1 instead"
-  defdelegate child_pid(id), to: Parent
-
-  @deprecated "Use Parent.child_meta/1 instead"
-  defdelegate child_meta(id), to: Parent
-
-  @deprecated "Use Parent.update_child_meta/2 instead"
-  defdelegate update_child_meta(id, updater), to: Parent
-
-  @deprecated "Use Parent.child?/1 instead"
-  defdelegate child?(id), to: Parent
-
   @impl GenServer
   def init({callback, arg, options}) do
     # needed to simulate a supervisor

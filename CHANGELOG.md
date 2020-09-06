@@ -5,6 +5,7 @@
 - `handle_child_terminated/5` callback of `Parent.GenServer` is replaced with `handle_child_terminated/2`.
 - `Parent.await_child_termination/2` is removed.
 - Return type of functions `Parent.children/0`, `Parent.handle_message/1`, `Parent.shutdown_child/1`, `Parent.restart_child/1` has changed. Refer to documentation for details.
+- Previously deprecated `Parent.GenServer` functions are removed.
 
 ## Additions
 
