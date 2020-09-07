@@ -2,19 +2,194 @@ defmodule Parent do
   @moduledoc """
   Functions for implementing a parent process.
 
+  A parent process is a process that manages the lifecycle of its children. Typically the simplest
+  approach is to use higher-level abstractions, such as `Parent.Supervisor` or `Parent.GenServer`.
+  The common behaviour for every parent process is implemented in this module, and therefore it is
+  described in this document.
+
+  ## Overview
+
   A parent process has the following properties:
 
-  1. It traps exits.
-  2. It tracks its children inside the process dictionary.
-  3. Before terminating, it stops its children synchronously, in the reverse startup order.
+    1. It traps exits and uses the `shutdown: :infinity` shutdown strategy.
+    2. It keeps track of its children.
+    3. It presents itself to the rest of the OTP as a supervisor, which means that generic code
+       walking the supervision tree, such as OTP release handler, will also iterate the parent's
+       subtree.
+    4. Before terminating, it stops its children synchronously, in the reverse startup order.
 
-  In most cases the simplest option is to start a parent process using a higher-level abstraction
-  such as `Parent.GenServer`. In this case you will use a subset of the API from this module to
-  start, stop, and enumerate your children.
+  You can interact with the parent process from other processes using functions from the
+  `Parent.Client` module. If you want to manipulate the parent from the inside, you can use the
+  functions from this module.
+
+  ## Initialization
+
+  A parent process has to be initialized using `initialize/1`. This function takes the following
+  initialization options:
+
+    - `:max_restarts` and `:max_seconds` - same as with `Supervisor`, with the same defaults
+    - `:registry?` - If true, the parent will manage its own ETS-based child registry. See the
+      "Child discovery" section for details.
+
+  When using higher-level abstractions, these options are typically passed throguh start functions,
+  such as `Parent.Supervisor.start_link/2`.
+
+  ## Child specification
+
+  Child specification describes how the parent starts and manages a child. This specification if
+  passed to functions such as `start_child/1`, `Parent.Client.start_child/2`, or
+  `Parent.Supervisor.start_link/2` to start a child process.
+
+  The specification is a map which is a superset of the [Supervisor child
+  specifications](https://hexdocs.pm/elixir/Supervisor.html#module-child-specification). All the
+  fields that are shared with `Supervisor` have the same effect.
+
+  It's worth noting that the `:id` field is optional. If not provided, the parent will auto-assign
+  a unique id when the child is started. Therefore, the minimum required child specification
+  is `%{start: mfa_or_zero_arity_fun}`.
+
+  Also, just like with `Supervisor`, you can provide `module | {module, arg}` when starting a
+  child. See [Supervisor.child_spec/1](https://hexdocs.pm/elixir/Supervisor.html#module-child_spec-1)
+  for details.
+
+  To modify a child specification, `Parent.child_spec/2` can be used.
+
+  ## Maximum restart frequency
+
+  Similarly to `Supervisor`, a parent process keeps track of the amount of restarts, and
+  self-terminates if maximum threshold (defaults to 3 restarts in 5 seconds) is exceeded.
+
+  In addition, you can provide child specific thresholds by including `:max_restarts` and
+  `:max_seconds` options in child specification. Finally, note that `:max_restarts` can be set to
+  `:infinity` (both for the parent and each child). This can be useful if you want to disable the
+  parent global limit, and use child-specific limits.
+
+  ## Bound children
+
+  You can bind the lifecycle of each child to the lifecycles of its older siblings. This is roughly
+  similar to the `:rest_for_one` supervisor strategy.
+
+  For example, if you want to start two children, consumer and producer, and bind the producer's
+  lifecycle to the consumer, you need the following child specifications:
+
+      consumer_spec = %{
+        id: :consumer,
+        # ...
+      }
+
+      producer_spec = %{
+        id: :producer,
+        binds_to: [:consumer]
+      }
+
+  This will make sure that if the consumer stops, the producer is taken down as well.
+
+  For this to work, you need to start the consumer before the producer. In other words, a child
+  can only be bound to its older siblings.
+
+  It's worth noting that bindings are transitive. If a child A is bound to the child B, which is
+  in turns bound to child C, then child A also depends on child C. If child C stops, B and A will
+  be stopped to.
+
+  ## Shutdown groups
+
+  A shutdown group is a mechanism that roughly emulates the `:one_for_all` supervisor strategy.
+  For example, to set up a two-way lifecycle dependency between the consumer and the producer, we
+  can use the following specifications:
+
+      consumer_spec = %{
+        id: :consumer,
+        shutdown_group: :consumer_and_producer
+        # ...
+      }
+
+      producer_spec = %{
+        id: :producer,
+        shutdown_group: :consumer_and_producer
+      }
+
+  In this case, when any child of the group terminates, the other children will be taken down as
+  well.
+
+  Note that a child can be a member of some shutdown group, and bound to other older siblings.
+
+  ## Lifecycle dependency consequences
+
+  As has been mentioned, a lifecycle dependency means that a child is taken down when its
+  dependency stops. This will happen irrespective of how the child has been stopped. Even if you
+  manually stop the child using functions such as `shutdown_child/1` or
+  `Parent.Client.shutdown_child/2`, the siblings bound to it will be taken down.
+
+  Likewise, if a child is restarted, all the siblings bound to it will be restarted. This also
+  holds for temporary children. A temporary child which is bound to a permanent child will be
+  restarted if the permanent child restarts. A temporary child will only be removed when it stops
+  on its own.
+
+  Bound processes will be taken down in the order opposite from the startup order. If the children
+  are restarted, they will be started in the original startup order. Restarting will preserve the
+  original startup order with respect to non-restarted children. For example, suppose that four
+  children are running: A, B, C, and D, and children B and D are restarted. When the parent process
+  stops, it will take the children down in the order D, C, B, and A.
+
+  Finally, it's worth noting that if termination of one child causes the restart of multiple children,
+  parent will treat this as a single restart event when calculating the restart frequency and
+  considering possible self-termination.
+
+  ## Child timeout
+
+  You can optionally include the `:timeout` option in the child specification to ask the parent to
+  terminate the child if it doesn't stop in the given time. In this case, the child's shutdown
+  strategy is ignore, and the child will be forcefully terminated (using the `:kill` exit signal).
+
+  A non-temporary child which timeouts will be restarted.
+
+  ## Child discovery
+
+  Children can be discovered by other processes using functions such as `Parent.Client.child_pid/2`,
+  or `Parent.Client.children/1`. By default, these functions will perform a synchronous call into
+  the parent process. This should work fine as long as the parent is not pressured by various
+  events, such as frequent children stopping and starting, or some other custom logic.
+
+  In such cases you can consider setting the `registry?` option to `true` when initializing the
+  parent process. When this option is set, parent will create an ETS table which will be used by
+  the discovery functions.
+
+  In addition, parent supports maintaining the child-specific meta information. You can set this
+  information by providing the `:meta` field in the child specification, update it through
+  functions such as `update_child_meta/2` or `Parent.Client.update_child_meta/3`, and query it
+  through `Parent.Client.child_meta/2`.
+
+  ## Building custom parent processes
 
   If available parent behaviours don't fit your purposes, you can consider building your own
-  behaviour or a concrete process. In this case, the functions of this module will provide the
-  necessary plumbing. To implement a parent process you need to do the following:
+  behaviour or a concrete parent process. In this case, the functions of this module will provide
+  the necessary plumbing.
+
+  The basic idea is presented in the following sketch:
+
+      defp init_process do
+        Parent.initialize(parent_opts)
+        start_some_children()
+        loop()
+      end
+
+      defp loop() do
+        receive do
+          msg ->
+            case Parent.handle_message(msg) do
+              # parent handled the message
+              :ignore -> loop()
+
+              # parent handled the message and returned some useful information
+              {:child_termination_info, info} -> handle_child_termination(info)
+
+              # not a parent message
+              nil -> custom_handle_message(msg)
+            end
+        end
+      end
+
+  More specifically, to build a parent process you need to do the following:
 
   1. Invoke `initialize/0` when the process is started.
   2. Use functions such as `start_child/1` to work with child processes.

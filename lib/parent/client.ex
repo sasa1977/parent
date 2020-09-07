@@ -1,4 +1,20 @@
 defmodule Parent.Client do
+  @moduledoc """
+  Functions for interacting with parent's children from other processes.
+
+  All of these functions by default issue a call to the parent process. Therefore, they can't be
+  used from inside the parent process. Use functions from the `Parent` module instead to interact
+  with the children from within the process.
+
+  Likewise these functions can't be invoked inside the child process during its initialization.
+  Defer interacting with the parent to `c:GenServer.handle_continue/2`, or if you're using another
+  behaviour which doesn't support such callback, send yourself a message to safely do the post-init
+  interaction with the parent.
+
+  If parent is configured with the `registry?: true` option, some query functions, such as
+  `child_pid/2` will perform an ETS lookup instead of issuing a call, so the caveats above won't
+  apply.
+  """
   alias Parent.Registry
 
   @doc false

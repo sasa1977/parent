@@ -35,6 +35,29 @@ defmodule Parent.SupervisorTest do
     end
   end
 
+  describe "__using__/1" do
+    defmodule MySupervisor do
+      use Supervisor
+    end
+
+    test "works when only module is passed" do
+      spec = Elixir.Supervisor.child_spec(MySupervisor, [])
+      assert spec.type == :supervisor
+      assert spec.shutdown == :infinity
+      assert spec.start == {MySupervisor, :start_link, [[], []]}
+    end
+
+    test "accepts {children, opts}" do
+      spec = Elixir.Supervisor.child_spec({MySupervisor, {[:spec1, :spec2], [foo: :bar]}}, [])
+      assert spec.start == {MySupervisor, :start_link, [[:spec1, :spec2], [foo: :bar]]}
+    end
+
+    test "uses :name for id if provided" do
+      spec = Elixir.Supervisor.child_spec({MySupervisor, {[], [name: :foo]}}, [])
+      assert spec.id == :foo
+    end
+  end
+
   defp start_supervisor!(children, opts) do
     pid = start_supervised!({Supervisor, {children, opts}})
     Mox.allow(Parent.RestartCounter.TimeProvider.Test, self(), pid)
