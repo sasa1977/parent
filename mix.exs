@@ -47,6 +47,8 @@ defmodule Parent.MixProject do
       source_url: "https://github.com/sasa1977/parent/",
       source_ref: @version,
       groups_for_modules: [
+        Core: [Parent, Parent.Client],
+        Behaviours: [Parent.GenServer, Parent.Supervisor],
         "Periodic job execution": ~r/Periodic(\..+)?/
       ]
     ]
