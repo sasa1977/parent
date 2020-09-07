@@ -1,9 +1,37 @@
 defmodule Parent.Client do
+  alias Parent.Registry
+
+  @doc false
+  def whereis_name({parent, child_id}) do
+    case child_pid(parent, child_id) do
+      {:ok, pid} -> pid
+      :error -> :undefined
+    end
+  end
+
+  @spec children(GenServer.server()) :: [Parent.child()]
+  def children(parent) do
+    case Registry.table(parent) do
+      {:ok, table} -> Registry.children(table)
+      :error -> call(parent, :children)
+    end
+  end
+
   @spec child_pid(GenServer.server(), Parent.child_id()) :: {:ok, pid} | :error
-  def child_pid(parent, child_id), do: call(parent, {:child_pid, child_id})
+  def child_pid(parent, child_id) do
+    case Registry.table(parent) do
+      {:ok, table} -> Registry.child_pid(table, child_id)
+      :error -> call(parent, {:child_pid, child_id})
+    end
+  end
 
   @spec child_meta(GenServer.server(), Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
-  def child_meta(parent, child_id), do: call(parent, {:child_meta, child_id})
+  def child_meta(parent, child_id) do
+    case Registry.table(parent) do
+      {:ok, table} -> Registry.child_meta(table, child_id)
+      :error -> call(parent, {:child_meta, child_id})
+    end
+  end
 
   @spec start_child(GenServer.server(), Parent.start_spec()) :: Supervisor.on_start_child()
   def start_child(parent, child_spec), do: call(parent, {:start_child, child_spec}, :infinity)
@@ -13,13 +41,14 @@ defmodule Parent.Client do
   def shutdown_child(parent, child_id), do: call(parent, {:shutdown_child, child_id}, :infinity)
 
   @spec restart_child(GenServer.server(), Parent.child_id()) :: :ok | {:error, :unknown_child}
-  def restart_child(parent, child_id), do: call(parent, {:restart_child, child_id})
+  def restart_child(parent, child_id), do: call(parent, {:restart_child, child_id}, :infinity)
 
   @spec shutdown_all(GenServer.server()) :: :ok
-  def shutdown_all(server), do: call(server, :shutdown_all)
+  def shutdown_all(server), do: call(server, :shutdown_all, :infinity)
 
   @spec return_children(GenServer.server(), Parent.return_info()) :: :ok
-  def return_children(parent, return_info), do: call(parent, {:return_children, return_info})
+  def return_children(parent, return_info),
+    do: call(parent, {:return_children, return_info}, :infinity)
 
   @spec update_child_meta(
           GenServer.server(),
@@ -27,9 +56,10 @@ defmodule Parent.Client do
           (Parent.child_meta() -> Parent.child_meta())
         ) :: :ok | :error
   def update_child_meta(parent, child_id, updater),
-    do: call(parent, {:update_child_meta, child_id, updater})
+    do: call(parent, {:update_child_meta, child_id, updater}, :infinity)
 
   @doc false
+  def handle_request(:children), do: Parent.children()
   def handle_request({:child_pid, child_id}), do: Parent.child_pid(child_id)
   def handle_request({:child_meta, child_id}), do: Parent.child_meta(child_id)
   def handle_request({:start_child, child_spec}), do: Parent.start_child(child_spec)
@@ -53,8 +83,8 @@ defmodule Parent.Client do
   def handle_request({:update_child_meta, child_id, updater}),
     do: Parent.update_child_meta(child_id, updater)
 
-  def call(server, request, timeout \\ 5000)
-      when (is_integer(timeout) and timeout >= 0) or timeout == :infinity do
+  defp call(server, request, timeout \\ 5000)
+       when (is_integer(timeout) and timeout >= 0) or timeout == :infinity do
     request = {__MODULE__, request}
 
     case GenServer.whereis(server) do

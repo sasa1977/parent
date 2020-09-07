@@ -18,17 +18,11 @@ defmodule Parent.SupervisorTest do
         children: [
           child_spec(id: :child1),
           child_spec(id: :child2, start: fn -> :ignore end),
-          Parent.child_spec(
-            {Registry, name: :registry, keys: :unique},
-            id: :child3
-          )
+          child_spec(id: :child3)
         ]
       )
 
-      assert [
-               {:child1, _pid1, :worker, [Agent]},
-               {:child3, _pid2, :supervisor, [Registry]}
-             ] = :supervisor.which_children(:my_supervisor)
+      assert [%{id: :child1}, %{id: :child3}] = Parent.Client.children(:my_supervisor)
     end
 
     test "fails to start if a child fails to start" do

@@ -1,6 +1,6 @@
 defmodule Parent.GenServerTest do
   use ExUnit.Case, async: true
-  alias Parent.TestServer
+  alias Parent.{Client, TestServer}
 
   setup do
     Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn ->
@@ -154,7 +154,7 @@ defmodule Parent.GenServerTest do
     child_spec = Parent.child_spec(%{start: {Agent, :start_link, [fn -> :ok end]}}, overrides)
     start = {Agent, :start_link, fn -> :ok end}
     child_spec = Map.merge(%{meta: {child_spec.id, :meta}, start: start}, child_spec)
-    Parent.Client.start_child(server, child_spec)
+    Client.start_child(server, child_spec)
   end
 
   defp start_child!(server, overrides) do
@@ -166,13 +166,9 @@ defmodule Parent.GenServerTest do
     do: Parent.child_spec(%{start: {Agent, :start_link, [fn -> :ok end]}}, overrides)
 
   defp child_pid!(server, child_id) do
-    {:ok, pid} = Parent.Client.child_pid(server, child_id)
+    {:ok, pid} = Client.child_pid(server, child_id)
     pid
   end
 
-  defp child_ids(server) do
-    server
-    |> :supervisor.which_children()
-    |> Enum.map(fn {child_id, _, _, _} -> child_id end)
-  end
+  defp child_ids(parent), do: Enum.map(Client.children(parent), & &1.id)
 end

@@ -153,9 +153,12 @@ defmodule Parent.State do
   end
 
   @spec update_child_meta(t, Parent.child_id(), (Parent.child_meta() -> Parent.child_meta())) ::
-          {:ok, t} | :error
+          {:ok, Parent.child_meta(), t} | :error
   def update_child_meta(state, id, updater) do
-    update(state, [id: id], &update_in(&1.spec.meta, updater))
+    with {:ok, state} <- update(state, [id: id], &update_in(&1.spec.meta, updater)) do
+      meta = child!(state, id: id).spec.meta
+      {:ok, meta, state}
+    end
   end
 
   defp update(state, filter, updater) do
