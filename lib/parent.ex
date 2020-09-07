@@ -276,7 +276,7 @@ defmodule Parent do
   @doc "Returns the list of running child processes in the startup order."
   @spec children :: [child]
   def children(),
-    do: Enum.map(State.children(state()), &%{id: &1.spec.id, pid: &1.pid, meta: &1.spec.meta})
+    do: Enum.map(State.children(state()), &%{id: &1.spec.id, pid: &1.pid, meta: &1.meta})
 
   @doc """
   Returns true if the child process is still running, false otherwise.
@@ -539,7 +539,7 @@ defmodule Parent do
       info = %{
         id: child.spec.id,
         pid: child.pid,
-        meta: child.spec.meta,
+        meta: child.meta,
         reason: reason,
         also_terminated: Enum.map(bound_siblings, &terminated_info/1),
         return_info: [restart: bound_siblings, record_restart: child]
@@ -628,7 +628,7 @@ defmodule Parent do
     exit(exit)
   end
 
-  defp terminated_info(child), do: %{id: child.spec.id, pid: child.pid, meta: child.spec.meta}
+  defp terminated_info(child), do: %{id: child.spec.id, pid: child.pid, meta: child.meta}
 
   defp stop_child(child, reason) do
     kill_timer(child.timer_ref, child.pid)

@@ -20,7 +20,8 @@ defmodule Parent.State do
           startup_index: non_neg_integer(),
           dependencies: MapSet.t(Parent.child_id()),
           bound_siblings: MapSet.t(Parent.child_id()),
-          restart_counter: RestartCounter.t()
+          restart_counter: RestartCounter.t(),
+          meta: Parent.child_meta()
         }
 
   @type filter :: [{:id, Parent.child_id()}] | [{:pid, pid}]
@@ -60,7 +61,8 @@ defmodule Parent.State do
       startup_index: state.startup_index,
       dependencies: dependencies,
       bound_siblings: MapSet.new(),
-      restart_counter: RestartCounter.new(spec.max_restarts, spec.max_seconds)
+      restart_counter: RestartCounter.new(spec.max_restarts, spec.max_seconds),
+      meta: spec.meta
     }
 
     state
@@ -82,7 +84,8 @@ defmodule Parent.State do
       | pid: pid,
         timer_ref: timer_ref,
         dependencies: dependencies,
-        bound_siblings: MapSet.new()
+        bound_siblings: MapSet.new(),
+        meta: child.spec.meta
     }
 
     state
@@ -149,27 +152,25 @@ defmodule Parent.State do
   def child_meta(state, id) do
     with {:ok, pid} <- child_pid(state, id),
          {:ok, child} <- Map.fetch(state.children, pid),
-         do: {:ok, child.spec.meta}
+         do: {:ok, child.meta}
   end
 
   @spec update_child_meta(t, Parent.child_id(), (Parent.child_meta() -> Parent.child_meta())) ::
           {:ok, Parent.child_meta(), t} | :error
   def update_child_meta(state, id, updater) do
-    with {:ok, state} <- update(state, [id: id], &update_in(&1.spec.meta, updater)) do
-      meta = child!(state, id: id).spec.meta
-      {:ok, meta, state}
-    end
+    with {:ok, child, state} <- update(state, [id: id], &update_in(&1.meta, updater)),
+         do: {:ok, child.meta, state}
   end
 
   defp update(state, filter, updater) do
     with {:ok, child} <- child(state, filter),
          updated_child = updater.(child),
          updated_children = Map.put(state.children, child.pid, updated_child),
-         do: {:ok, %{state | children: updated_children}}
+         do: {:ok, updated_child, %{state | children: updated_children}}
   end
 
   defp update!(state, filter, updater) do
-    {:ok, state} = update(state, filter, updater)
+    {:ok, _child, state} = update(state, filter, updater)
     state
   end
 

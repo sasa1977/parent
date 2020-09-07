@@ -670,6 +670,16 @@ defmodule ParentTest do
       assert Parent.update_child_meta(:child1, & &1) == :error
     end
 
+    test "doesn't affect meta of a reset child" do
+      Parent.initialize()
+
+      start_child!(id: :child, meta: 1)
+      Parent.update_child_meta(:child, &(&1 + 1))
+      provoke_child_restart!(:child)
+
+      assert Parent.child_meta(:child) == {:ok, 1}
+    end
+
     test "fails if the parent is not initialized" do
       assert_raise RuntimeError, "Parent is not initialized", fn ->
         Parent.update_child_meta(:child, & &1)
