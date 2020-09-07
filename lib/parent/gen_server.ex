@@ -145,7 +145,7 @@ defmodule Parent.GenServer do
   use GenServer
 
   @type state :: term
-  @type option :: Parent.option() | GenServer.option()
+  @type options :: [Parent.option() | GenServer.option()]
 
   @doc """
   Invoked when a child has terminated.
@@ -163,7 +163,7 @@ defmodule Parent.GenServer do
             when new_state: state
 
   @doc "Starts the parent process."
-  @spec start_link(module, arg :: term, [option]) :: GenServer.on_start()
+  @spec start_link(module, arg :: term, options) :: GenServer.on_start()
   def start_link(module, arg, options \\ []) do
     {parent_opts, gen_server_opts} =
       Keyword.split(options, ~w/max_restarts max_seconds registry?/a)
@@ -256,13 +256,7 @@ defmodule Parent.GenServer do
       See `Supervisor`.
       """
       def child_spec(arg) do
-        default = %{
-          id: __MODULE__,
-          start: {__MODULE__, :start_link, [arg]},
-          shutdown: :infinity,
-          type: :supervisor
-        }
-
+        default = Parent.parent_spec(id: __MODULE__, start: {__MODULE__, :start_link, [arg]})
         Supervisor.child_spec(default, unquote(Macro.escape(opts)))
       end
 

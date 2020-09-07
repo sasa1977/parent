@@ -1,13 +1,9 @@
 defmodule Parent.Supervisor do
   use Parent.GenServer
 
-  @type option :: Parent.GenServer.option() | {:children, [Parent.start_spec()]}
-
-  @spec start_link([option]) :: GenServer.on_start()
-  def start_link(options) do
-    {children, options} = Keyword.pop(options, :children, [])
-    Parent.GenServer.start_link(__MODULE__, children, options)
-  end
+  @spec start_link([Parent.start_spec()], Parent.GenServer.options()) :: GenServer.on_start()
+  def start_link(children, options \\ []),
+    do: Parent.GenServer.start_link(__MODULE__, children, options)
 
   @impl GenServer
   def init(children) do
@@ -15,5 +11,11 @@ defmodule Parent.Supervisor do
     {:ok, nil}
   end
 
-  @spec child_spec([option]) :: Parent.child_spec()
+  @spec child_spec({[Parent.start_spec()], Parent.GenServer.options()}) :: Supervisor.child_spec()
+  def child_spec({children, options} = args) do
+    args
+    |> super()
+    |> Map.put(:start, {__MODULE__, :start_link, [children, options]})
+    |> Map.put(:id, Keyword.get(options, :name))
+  end
 end

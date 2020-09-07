@@ -14,12 +14,12 @@ defmodule Parent.SupervisorTest do
   describe "start_link/1" do
     test "starts the given children" do
       start_supervisor!(
-        name: :my_supervisor,
-        children: [
+        [
           child_spec(id: :child1),
           child_spec(id: :child2, start: fn -> :ignore end),
           child_spec(id: :child3)
-        ]
+        ],
+        name: :my_supervisor
       )
 
       assert [%{id: :child1}, %{id: :child3}] = Parent.Client.children(:my_supervisor)
@@ -30,13 +30,13 @@ defmodule Parent.SupervisorTest do
       children = [child_spec(id: :child1, start: fn -> {:error, :some_reason} end)]
 
       assert capture_log(fn ->
-               assert Supervisor.start_link(children: children) == {:error, :start_error}
+               assert Supervisor.start_link(children) == {:error, :start_error}
              end) =~ "[error] Error starting the child :child1: :some_reason"
     end
   end
 
-  defp start_supervisor!(opts) do
-    pid = start_supervised!({Supervisor, opts})
+  defp start_supervisor!(children, opts) do
+    pid = start_supervised!({Supervisor, {children, opts}})
     Mox.allow(Parent.RestartCounter.TimeProvider.Test, self(), pid)
     pid
   end

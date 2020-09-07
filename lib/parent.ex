@@ -97,6 +97,10 @@ defmodule Parent do
     |> Map.merge(Map.new(overrides))
   end
 
+  @spec parent_spec(Keyword.t() | child_spec) :: child_spec
+  def parent_spec(overrides \\ []),
+    do: Map.merge(%{shutdown: :infinity, type: :supervisor}, Map.new(overrides))
+
   @doc """
   Initializes the state of the parent process.
 

@@ -16,8 +16,8 @@ defmodule Parent.ClientTest do
       test "returns the pid of the given child when registry is #{registry?}" do
         parent =
           start_parent!(
-            registry?: unquote(registry?),
-            children: [child_spec(id: :child1), child_spec(id: :child2)]
+            [child_spec(id: :child1), child_spec(id: :child2)],
+            registry?: unquote(registry?)
           )
 
         assert {:ok, pid1} = Client.child_pid(parent, :child1)
@@ -29,7 +29,7 @@ defmodule Parent.ClientTest do
 
       test "can dereference aliases when registry is #{registry?}" do
         registered_name = :"alias_#{System.unique_integer([:positive, :monotonic])}"
-        parent = start_parent!(children: [child_spec(id: :child)], name: registered_name)
+        parent = start_parent!([child_spec(id: :child)], name: registered_name)
         :global.register_name(registered_name, parent)
 
         assert {:ok, _} = Client.child_pid(registered_name, :child)
@@ -38,15 +38,15 @@ defmodule Parent.ClientTest do
       end
 
       test "returns error when child is unknown when registry is #{registry?}" do
-        parent = start_parent!(registry?: unquote(registry?))
+        parent = start_parent!([], registry?: unquote(registry?))
         assert Client.child_pid(parent, :child) == :error
       end
 
       test "returns error if child is stopped when registry is #{registry?}" do
         parent =
           start_parent!(
-            registry?: unquote(registry?),
-            children: [child_spec(id: :child1), child_spec(id: :child2)]
+            [child_spec(id: :child1), child_spec(id: :child2)],
+            registry?: unquote(registry?)
           )
 
         Client.shutdown_child(parent, :child1)
@@ -62,11 +62,8 @@ defmodule Parent.ClientTest do
       test "returns children when registry is #{registry?}" do
         parent =
           start_parent!(
-            registry?: unquote(registry?),
-            children: [
-              child_spec(id: :child1, meta: :meta1),
-              child_spec(id: :child2, meta: :meta2)
-            ]
+            [child_spec(id: :child1, meta: :meta1), child_spec(id: :child2, meta: :meta2)],
+            registry?: unquote(registry?)
           )
 
         {:ok, child1} = Client.child_pid(parent, :child1)
@@ -85,8 +82,8 @@ defmodule Parent.ClientTest do
       test "resolves the pid of the given child when registry is #{registry?}" do
         parent =
           start_parent!(
-            registry?: unquote(registry?),
-            children: [child_spec(id: :child1), child_spec(id: :child2)]
+            [child_spec(id: :child1), child_spec(id: :child2)],
+            registry?: unquote(registry?)
           )
 
         assert pid1 = GenServer.whereis({:via, Client, {parent, :child1}})
@@ -97,7 +94,7 @@ defmodule Parent.ClientTest do
       end
 
       test "returns nil when child is unknown when registry is #{registry?}" do
-        parent = start_parent!(registry?: unquote(registry?))
+        parent = start_parent!([], registry?: unquote(registry?))
         assert GenServer.whereis({:via, Client, {parent, :child}}) == nil
       end
     end
@@ -108,11 +105,8 @@ defmodule Parent.ClientTest do
       test "returns the meta of the given child when registry is #{registry?}" do
         parent =
           start_parent!(
-            registry?: unquote(registry?),
-            children: [
-              child_spec(id: :child1, meta: :meta1),
-              child_spec(id: :child2, meta: :meta2)
-            ]
+            [child_spec(id: :child1, meta: :meta1), child_spec(id: :child2, meta: :meta2)],
+            registry?: unquote(registry?)
           )
 
         assert Client.child_meta(parent, :child1) == {:ok, :meta1}
@@ -128,7 +122,7 @@ defmodule Parent.ClientTest do
 
   describe "update_child_meta/1" do
     test "succeeds if child exists" do
-      parent = start_parent!(children: [child_spec(id: :child, meta: 1)])
+      parent = start_parent!([child_spec(id: :child, meta: 1)])
       assert Client.update_child_meta(parent, :child, &(&1 + 1))
       assert Client.child_meta(parent, :child) == {:ok, 2}
     end
@@ -141,13 +135,13 @@ defmodule Parent.ClientTest do
 
   describe "start_child/1" do
     test "adds the additional child" do
-      parent = start_parent!(children: [child_spec(id: :child1)])
+      parent = start_parent!([child_spec(id: :child1)])
       assert {:ok, child2} = Client.start_child(parent, child_spec(id: :child2))
       assert child_pid!(parent, :child2) == child2
     end
 
     test "returns error" do
-      parent = start_parent!(children: [child_spec(id: :child1)])
+      parent = start_parent!([child_spec(id: :child1)])
       {:ok, child2} = Client.start_child(parent, child_spec(id: :child2))
 
       assert Client.start_child(parent, child_spec(id: :child2)) ==
@@ -158,7 +152,7 @@ defmodule Parent.ClientTest do
     end
 
     test "handles child start crash" do
-      parent = start_parent!(children: [child_spec(id: :child1)])
+      parent = start_parent!([child_spec(id: :child1)])
 
       capture_log(fn ->
         spec =
@@ -172,7 +166,7 @@ defmodule Parent.ClientTest do
     end
 
     test "handles :ignore" do
-      parent = start_parent!(children: [child_spec(id: :child1)])
+      parent = start_parent!([child_spec(id: :child1)])
 
       assert Client.start_child(
                parent,
@@ -185,7 +179,7 @@ defmodule Parent.ClientTest do
 
   describe "shutdown_child/1" do
     test "stops the given child" do
-      parent = start_parent!(children: [child_spec(id: :child)])
+      parent = start_parent!([child_spec(id: :child)])
       assert {:ok, _info} = Client.shutdown_child(parent, :child)
       assert Client.child_pid(parent, :child) == :error
       assert child_ids(parent) == []
@@ -199,7 +193,7 @@ defmodule Parent.ClientTest do
 
   describe "restart_child/1" do
     test "stops the given child" do
-      parent = start_parent!(children: [child_spec(id: :child)])
+      parent = start_parent!([child_spec(id: :child)])
       pid1 = child_pid!(parent, :child)
       assert Client.restart_child(parent, :child) == :ok
       assert child_ids(parent) == [:child]
@@ -214,7 +208,7 @@ defmodule Parent.ClientTest do
 
   describe "shutdown_all/1" do
     test "stops all children" do
-      parent = start_parent!(children: [child_spec(id: :child1), child_spec(id: :child2)])
+      parent = start_parent!([child_spec(id: :child1), child_spec(id: :child2)])
       assert Client.shutdown_all(parent) == :ok
       assert child_ids(parent) == []
     end
@@ -223,16 +217,14 @@ defmodule Parent.ClientTest do
   describe "return_children/1" do
     test "returns all given children" do
       parent =
-        start_parent!(
-          children: [
-            child_spec(id: :child1, shutdown_group: :group1),
-            child_spec(id: :child2, binds_to: [:child1], shutdown_group: :group2),
-            child_spec(id: :child3, binds_to: [:child2]),
-            child_spec(id: :child4, shutdown_group: :group1),
-            child_spec(id: :child5, shutdown_group: :group2),
-            child_spec(id: :child6)
-          ]
-        )
+        start_parent!([
+          child_spec(id: :child1, shutdown_group: :group1),
+          child_spec(id: :child2, binds_to: [:child1], shutdown_group: :group2),
+          child_spec(id: :child3, binds_to: [:child2]),
+          child_spec(id: :child4, shutdown_group: :group1),
+          child_spec(id: :child5, shutdown_group: :group2),
+          child_spec(id: :child6)
+        ])
 
       {:ok, %{return_info: return_info}} = Client.shutdown_child(parent, :child4)
       assert child_ids(parent) == [:child6]
@@ -242,8 +234,8 @@ defmodule Parent.ClientTest do
     end
   end
 
-  defp start_parent!(opts \\ []) do
-    parent = start_supervised!({Parent.Supervisor, opts})
+  defp start_parent!(children \\ [], opts \\ []) do
+    parent = start_supervised!({Parent.Supervisor, {children, opts}})
     Mox.allow(Parent.RestartCounter.TimeProvider.Test, self(), parent)
     parent
   end
