@@ -56,13 +56,17 @@ defmodule Parent.Client do
           {:ok, Parent.on_shutdown_child()} | {:error, :unknown_child}
   def shutdown_child(parent, child_id), do: call(parent, {:shutdown_child, child_id}, :infinity)
 
-  @spec restart_child(GenServer.server(), Parent.child_id()) :: :ok | {:error, :unknown_child}
+  @spec restart_child(GenServer.server(), Parent.child_id()) ::
+          {:ok, {restarted :: [Parent.child_id()], Parent.return_info() | nil}}
+          | {:error, :unknown_child}
   def restart_child(parent, child_id), do: call(parent, {:restart_child, child_id}, :infinity)
 
-  @spec shutdown_all(GenServer.server()) :: :ok
+  @spec shutdown_all(GenServer.server()) :: Parent.return_info()
   def shutdown_all(server), do: call(server, :shutdown_all, :infinity)
 
-  @spec return_children(GenServer.server(), Parent.return_info()) :: :ok
+  @spec return_children(GenServer.server(), Parent.return_info()) ::
+          {:ok, {restarted :: [Parent.child_id()], Parent.return_info() | nil}}
+          | {:error, :unknown_child}
   def return_children(parent, return_info),
     do: call(parent, {:return_children, return_info}, :infinity)
 

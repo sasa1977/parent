@@ -195,7 +195,7 @@ defmodule Parent.ClientTest do
     test "stops the given child" do
       parent = start_parent!([child_spec(id: :child)])
       pid1 = child_pid!(parent, :child)
-      assert Client.restart_child(parent, :child) == :ok
+      assert Client.restart_child(parent, :child) == {[:child], nil}
       assert child_ids(parent) == [:child]
       refute child_pid!(parent, :child) == pid1
     end
@@ -209,7 +209,7 @@ defmodule Parent.ClientTest do
   describe "shutdown_all/1" do
     test "stops all children" do
       parent = start_parent!([child_spec(id: :child1), child_spec(id: :child2)])
-      assert Client.shutdown_all(parent) == :ok
+      assert Parent.children_to_return(Client.shutdown_all(parent)) == ~w/child1 child2/a
       assert child_ids(parent) == []
     end
   end
@@ -229,7 +229,9 @@ defmodule Parent.ClientTest do
       {:ok, %{return_info: return_info}} = Client.shutdown_child(parent, :child4)
       assert child_ids(parent) == [:child6]
 
-      assert Client.return_children(parent, return_info) == :ok
+      assert Client.return_children(parent, return_info) ==
+               {~w/child1 child2 child3 child4 child5/a, nil}
+
       assert child_ids(parent) == ~w/child1 child2 child3 child4 child5 child6/a
     end
   end

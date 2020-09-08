@@ -266,7 +266,7 @@ defmodule ParentTest do
     test "restarts the process and returns the new pid" do
       Parent.initialize()
       child = start_child!(id: :child)
-      Parent.restart_child(:child)
+      assert Parent.restart_child(:child) == {[:child], nil}
       refute child_pid!(:child) == child
     end
 
@@ -276,7 +276,7 @@ defmodule ParentTest do
       _child2 = start_child!(id: :child2)
       child3 = start_child!(id: :child3)
 
-      Parent.restart_child(:child2)
+      {[:child2], nil} = Parent.restart_child(:child2)
       {:ok, child2} = Parent.child_pid(:child2)
       assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
@@ -291,7 +291,7 @@ defmodule ParentTest do
       child5 = start_child!(id: :child5, shutdown_group: :group2)
       child6 = start_child!(id: :child6)
 
-      Parent.restart_child(:child4)
+      assert Parent.restart_child(:child4) == {~w/child1 child2 child3 child4 child5/a, nil}
 
       refute child_pid!(:child1) == child1
       refute child_pid!(:child2) == child2
@@ -385,6 +385,19 @@ defmodule ParentTest do
       succeed_on_child_start(:child2)
       assert handle_parent_message() == :ignore
       assert [%{id: :child1}, %{id: :child2}] = Parent.children()
+    end
+
+    test "gives up if a temporary bound child fails to start" do
+      Parent.initialize()
+
+      child1 = start_child!(id: :child1)
+      child2 = start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
+
+      Process.exit(child1, :kill)
+      raise_on_child_start(:child2)
+
+      assert {:child_terminated, %{pid: ^child2}} = handle_parent_message()
+      assert [%{id: :child1}] = Parent.children()
     end
 
     test "also restarts bound siblings" do
@@ -517,6 +530,18 @@ defmodule ParentTest do
       assert_receive {:DOWN, _mref, :process, pid3, _reason}
 
       assert [pid1, pid2, pid3] == [child3, child2, child1]
+    end
+
+    test "returns return_info that can be passed to return_children/1" do
+      Parent.initialize()
+
+      start_child!(id: :child1)
+      start_child!(id: :child2)
+      start_child!(id: :child3)
+
+      return_info = Parent.shutdown_all()
+      assert Parent.return_children(return_info) == {~w/child1 child2 child3/a, nil}
+      assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2 child3/a
     end
 
     test "fails if the parent is not initialized" do
@@ -802,7 +827,9 @@ defmodule ParentTest do
       child2 = start_child!(id: :child2)
       start_child!(id: :child3, binds_to: [:child1])
       return_info = Parent.shutdown_child(:child1).return_info
-      Parent.return_children(return_info)
+
+      assert {started, nil} = Parent.return_children(return_info)
+      assert started == ~w/child1 child3/a
 
       assert [
                %{id: :child1, pid: child1},
@@ -823,20 +850,59 @@ defmodule ParentTest do
       assert [pid1, pid2, pid3] == [child3, child2, child1]
     end
 
+    test "returns successfully started processes, trying to restart other automatically" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      start_child!(id: :child2, binds_to: [:child1])
+      start_child!(id: :child3, binds_to: [:child1], shutdown_group: :group1)
+      start_child!(id: :child4, shutdown_group: :group1)
+      start_child!(id: :child5, binds_to: [:child3])
+      start_child!(id: :child6, binds_to: [:child5], shutdown_group: :group1)
+
+      return_info = Parent.shutdown_child(:child1).return_info
+      raise_on_child_start(:child5)
+
+      assert Parent.return_children(return_info) == {~w/child1 child2/a, nil}
+      assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2/a
+
+      succeed_on_child_start(:child5)
+      # happens when the process crashes during its start
+      assert_receive {:EXIT, _, _}
+      assert handle_parent_message() == :ignore
+
+      assert Enum.map(Parent.children(), & &1.id) ==
+               ~w/child1 child2 child3 child4 child5 child6/a
+    end
+
+    test "returns return_info if process which failed to start is temporary" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      start_child!(id: :child2, binds_to: [:child1], restart: :temporary)
+      start_child!(id: :child3, binds_to: [:child1], restart: :temporary)
+
+      return_info = Parent.shutdown_child(:child1).return_info
+      raise_on_child_start(:child2)
+
+      assert {[:child1], return_info} = Parent.return_children(return_info)
+      assert Enum.map(Parent.children(), & &1.id) == [:child1]
+      assert Parent.children_to_return(return_info) == ~w/child2 child3/a
+    end
+
     test "is idempotent" do
       Parent.initialize()
-      start_child!(id: :child, restart: :temporary, max_restarts: 1)
-      return_info = provoke_child_termination!(:child, at: 0).return_info
-      Parent.return_children(return_info)
-      Parent.return_children(return_info)
-      assert [%{id: :child}] = Parent.children()
+      start_child!(id: :child1, restart: :temporary)
+      start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
+      return_info = provoke_child_termination!(:child1, at: 0).return_info
+      assert Parent.return_children(return_info) == {~w/child1 child2/a, nil}
+      assert Parent.return_children(return_info) == {[], nil}
+      assert [%{id: :child1}, %{id: :child2}] = Parent.children()
     end
 
     test "records restart of a terminated child" do
       Parent.initialize()
-      start_child!(id: :child1, shutdown_group: :group1, restart: :temporary)
+      start_child!(id: :child1, restart: :temporary)
       start_child!(id: :child2)
-      start_child!(id: :child3, shutdown_group: :group1, restart: :temporary, max_restarts: 1)
+      start_child!(id: :child3, binds_to: [:child1], restart: :temporary, max_restarts: 1)
 
       return_info = provoke_child_termination!(:child3, at: 0).return_info
       Parent.return_children(return_info)
