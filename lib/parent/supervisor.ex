@@ -52,7 +52,7 @@ defmodule Parent.Supervisor do
     {:ok, nil}
   end
 
-  @spec child_spec({[Parent.start_spec()], Parent.GenServer.options()}) :: Supervisor.child_spec()
+  @spec child_spec({[Parent.start_spec()], Parent.GenServer.options()}) :: Parent.child_spec()
   def child_spec({children, options}) do
     [start: {__MODULE__, :start_link, [children, options]}]
     |> Parent.parent_spec()
