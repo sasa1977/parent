@@ -930,17 +930,32 @@ defmodule Parent do
   end
 
   defp sync_stop_process(pid, exit_signal, wait_time) do
+    # Using monitors to detect process termination. In most cases links would suffice, but
+    # monitors can help us deal with a child which unlinked itself from the parent.
+    mref = Process.monitor(pid)
     Process.exit(pid, exit_signal)
 
+    # TODO: we should check the reason and log an error if it's not `exit_signal` (or :killed in
+    # the second receive).
     receive do
-      {:EXIT, ^pid, _reason} -> :ok
+      {:DOWN, ^mref, :process, ^pid, _reason} -> :ok
     after
       wait_time ->
         Process.exit(pid, :kill)
 
         receive do
-          {:EXIT, ^pid, _reason} -> :ok
+          {:DOWN, ^mref, :process, ^pid, _reason} -> :ok
         end
+    end
+
+    # cleanup the exit signal
+    receive do
+      {:EXIT, ^pid, _reason} -> :ok
+    after
+      # timeout 0 is fine b/c exit signals are sent before monitors
+      0 ->
+        # if we end up here, the child has unlinked itself
+        :ok
     end
   end
 
