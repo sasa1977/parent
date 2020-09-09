@@ -80,11 +80,9 @@ defmodule Parent.GenServerTest do
   test "restarts the child automatically" do
     server = start_server!(name: :my_server, children: [child_spec(id: :child)])
 
-    :erlang.trace(server, true, [:call])
-    Code.ensure_loaded(Parent.Restart)
-    :erlang.trace_pattern({Parent.Restart, :perform, :_}, [])
+    trace_function_calls(server, Parent.Restart, :perform)
     Agent.stop(child_pid!(server, :child))
-    assert_receive {:trace, ^server, :call, {Parent.Restart, :perform, _args}}
+    await_function_return(server, Parent.Restart, :perform)
 
     assert child_ids(server) == [:child]
   end
@@ -166,4 +164,13 @@ defmodule Parent.GenServerTest do
   end
 
   defp child_ids(parent), do: Enum.map(Client.children(parent), & &1.id)
+
+  defp trace_function_calls(server, module, function) do
+    :erlang.trace(server, true, [:call])
+    Code.ensure_loaded(module)
+    :erlang.trace_pattern({module, function, :_}, [{:_, [], [{:return_trace}]}], [])
+  end
+
+  defp await_function_return(server, module, function),
+    do: assert_receive({:trace, ^server, :return_from, {^module, ^function, _args}, _result})
 end
