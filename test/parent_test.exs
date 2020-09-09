@@ -733,6 +733,13 @@ defmodule ParentTest do
       assert Parent.update_child_meta(:child1, & &1) == :error
     end
 
+    test "updates meta in registry, fails otherwise" do
+      Parent.initialize(registry?: true)
+      start_child!(id: :child1, meta: 1)
+      Parent.update_child_meta(:child1, &(&1 + 1))
+      assert Parent.Client.child_meta(self(), :child1) == {:ok, 2}
+    end
+
     test "doesn't affect meta of a reset child" do
       Parent.initialize()
 

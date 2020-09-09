@@ -308,7 +308,10 @@ defmodule Parent.GenServer do
         {:noreply, state}
       end
 
-      defoverridable handle_info: 2, handle_stopped_children: 2, child_spec: 1
+      @impl GenServer
+      def code_change(_old, state, _extra), do: {:ok, state}
+
+      defoverridable handle_info: 2, handle_stopped_children: 2, child_spec: 1, code_change: 3
     end
   end
 end

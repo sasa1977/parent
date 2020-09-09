@@ -10,8 +10,6 @@ defmodule Parent.TestServer do
 
   def send(pid, fun), do: Kernel.send(pid, fun)
 
-  def terminated_jobs(), do: Process.get(:terminated_jobs)
-
   @impl GenServer
   def init(initializer), do: {:ok, initializer.()}
 

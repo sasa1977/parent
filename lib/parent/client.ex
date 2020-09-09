@@ -105,6 +105,8 @@ defmodule Parent.Client do
 
   defp call(server, request, timeout \\ 5000)
        when (is_integer(timeout) and timeout >= 0) or timeout == :infinity do
+    # This is the custom implementation of a call. We're not using standard GenServer calls to
+    # ensure that this call won't end up in some custom behaviour's handle_call.
     request = {__MODULE__, request}
 
     case GenServer.whereis(server) do
