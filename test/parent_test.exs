@@ -117,6 +117,39 @@ defmodule ParentTest do
       assert error == {:missing_deps, ~w/child4 child5/a}
     end
 
+    for {from, tos} <- [
+          permanent: ~w/transient with_dep temporary/a,
+          transient: ~w/with_dep temporary/a,
+          with_dep: ~w/temporary/a
+        ],
+        to <- tos do
+      test "exits on forbidden dependency from #{from} to #{to}" do
+        Parent.initialize()
+        start_child!(id: :child1, restart: unquote(to))
+
+        assert capture_log(fn ->
+                 assert catch_exit(
+                          start_child(id: :child2, restart: unquote(from), binds_to: [:child1])
+                        ) == :invalid_binding
+               end) =~ "Forbidden binding from #{unquote(from)} child :child2 to :child1"
+      end
+    end
+
+    test "exits when children in a shutdown group don't have the same restart type" do
+      Parent.initialize()
+
+      for r1 <- ~w/temporary transient with_dep temporary/a,
+          r2 <- ~w/temporary transient with_dep temporary/a,
+          r1 != r2 do
+        start_child!(id: :child1, restart: r1, shutdown_group: :group)
+
+        assert capture_log(fn ->
+                 assert catch_exit(start_child(id: :child2, restart: r2, shutdown_group: :group)) ==
+                          :invalid_shutdown_group
+               end) =~ "Shutdown group :group  has children with different restart types"
+      end
+    end
+
     test "fails if the parent is not initialized" do
       assert_raise RuntimeError, "Parent is not initialized", &start_child/0
     end
@@ -340,6 +373,15 @@ defmodule ParentTest do
       refute Parent.child?(:child)
     end
 
+    test "is not performed when a with_dep child terminates" do
+      Parent.initialize()
+      child = start_child!(id: :child, restart: :with_dep)
+      Process.exit(child, :kill)
+
+      refute match?({:child_restarted, _restart_info}, handle_parent_message())
+      refute Parent.child?(:child)
+    end
+
     test "is not performed when a child is terminated via `Parent` function" do
       Parent.initialize()
       start_child!(id: :child)
@@ -391,7 +433,8 @@ defmodule ParentTest do
       start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
       child4 = start_child!(id: :child4, shutdown_group: :group1)
       child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
-      child6 = start_child!(id: :child6)
+      child6 = start_child!(id: :child6, restart: :with_dep, binds_to: [:child5])
+      child7 = start_child!(id: :child7)
 
       assert {:stopped_children, %{child3: _}} = provoke_child_restart!(:child4)
       refute Parent.child?(:child3)
@@ -400,7 +443,8 @@ defmodule ParentTest do
       refute child_pid!(:child2) == child2
       refute child_pid!(:child4) == child4
       refute child_pid!(:child5) == child5
-      assert child_pid!(:child6) == child6
+      refute child_pid!(:child6) == child6
+      assert child_pid!(:child7) == child7
     end
 
     test "takes down the entire parent on too many global restarts" do

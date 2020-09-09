@@ -54,6 +54,15 @@ defmodule Parent do
 
   To modify a child specification, `Parent.child_spec/2` can be used.
 
+  ## Child restart
+
+  The `:restart` option can have following values:
+
+    - `:permanent` - A child is automatically restarted if it stops. This is the default value.
+    - `:transient` - A child is automatically restarted only if it exits abnormally.
+    - `:with_dep` - A child is restarted only if its dependency is restarted.
+    - `:temporary` - A child is not automatically restarted.
+
   ## Maximum restart frequency
 
   Similarly to `Supervisor`, a parent process keeps track of the amount of restarts, and
@@ -91,6 +100,11 @@ defmodule Parent do
   in turns bound to child C, then child A also depends on child C. If child C stops, B and A will
   be stopped to.
 
+  Finally, because of binding semantics (see Lifecycle dependency consequences), a child can only
+  be bound to a sibling with the same or stronger restart option, where restart strengths can
+  be defined as permanent > transient > with_dep > temporary. So for example, a permanent child
+  can't be bound to a temporary child.
+
   ## Shutdown groups
 
   A shutdown group is a mechanism that roughly emulates the `:one_for_all` supervisor strategy.
@@ -110,6 +124,8 @@ defmodule Parent do
 
   In this case, when any child of the group terminates, the other children will be taken down as
   well.
+
+  All children belonging to the same shutdown group must use the same `:restart` option.
 
   Note that a child can be a member of some shutdown group, and bound to other older siblings.
 
@@ -248,7 +264,7 @@ defmodule Parent do
           optional(:meta) => child_meta,
           optional(:shutdown) => shutdown,
           optional(:timeout) => pos_integer | :infinity,
-          optional(:restart) => :temporary | :permanent | :transient,
+          optional(:restart) => :temporary | :transient | :with_dep | :permanent,
           optional(:max_restarts) => non_neg_integer | :infinity,
           optional(:max_seconds) => pos_integer,
           optional(:binds_to) => [child_id],
@@ -631,27 +647,32 @@ defmodule Parent do
     end
   end
 
-  defp check_valid_bindings!(state, child_spec) do
+  defp check_valid_bindings!(state, %{restart: from} = child_spec) do
     child_spec.binds_to
     |> Stream.map(&State.child!(state, id: &1))
-    |> Enum.find(fn dep ->
-      # 1. only a temporary child can bind to a temporary child
-      # 2. both temporary and transient can bind to a transient child
-      # 3. (implicit) everyone can bind to a permanent child
-      (dep.spec.restart == :temporary and child_spec.restart != :temporary) or
-        (dep.spec.restart == :transient and child_spec.restart not in ~w/temporary transient/a)
+    |> Enum.reject(fn %{spec: %{restart: to}} ->
+      # Valid bindings:
+      #
+      # 1. A child can bind to a dep with the same restart strategy
+      # 2. Transient child can bind to a permanent child
+      # 3. with_dep child can bind to a transient and a permanent child
+      # 4. Temporary child can bind to everyone
+
+      from == to or
+        (from == :transient and to == :permanent) or
+        (from == :with_dep and to in ~w/transient permanent/a) or
+        from == :temporary
     end)
     |> case do
-      nil ->
+      [] ->
         :ok
 
-      forbidden_dep ->
-        give_up!(
-          state,
-          :invalid_binding,
-          "Forbidden binding from #{child_spec.restart} child #{inspect(child_spec.id)} " <>
-            "to #{forbidden_dep.spec.restart} child #{forbidden_dep.spec.id}"
-        )
+      deps ->
+        msg =
+          "Forbidden binding from #{child_spec.restart} child #{inspect(child_spec.id)} to " <>
+            (deps |> Stream.map(&inspect(&1.spec.id)) |> Enum.join(", "))
+
+        give_up!(state, :invalid_binding, msg)
     end
   end
 
@@ -730,9 +751,10 @@ defmodule Parent do
     Enum.each(Enum.reverse(bound_siblings), &stop_child(&1, :shutdown))
     stopped_children = stopped_children([child | bound_siblings])
 
-    if requires_restart?(child, reason),
-      do: auto_return(state, stopped_children),
-      else: {{:stopped_children, stopped_children}, state}
+    if child.spec.restart == :permanent or
+         (child.spec.restart == :transient and reason != :normal),
+       do: auto_return(state, stopped_children),
+       else: {{:stopped_children, stopped_children}, state}
   end
 
   defp auto_return(state, stopped_children) do
@@ -742,11 +764,6 @@ defmodule Parent do
       # all children successfully returned
       do: {:ignore, state},
       else: {{:stopped_children, stopped_children}, state}
-  end
-
-  defp requires_restart?(child, reason) do
-    child.spec.restart == :permanent or
-      (child.spec.restart == :transient and reason != :normal)
   end
 
   # core logic of all restarts, both automatic and manual
