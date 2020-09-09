@@ -376,8 +376,12 @@ defmodule Parent do
   @doc """
   Restarts the child.
 
-  This function will also restart all non-temporary siblings and shut down all temporary siblings
-  directly and transitively bound to the given child.
+  This function will also restart all siblings which are bound to this child, including temporary
+  children. You can change this behaviour by passing `include_temporary?: false`.
+
+  The function might partially succeed if some non-temporary children fail to start. In this case
+  the resulting `stopped_children` map will contain the corresponding entries. You can pass this
+  map to `return_children/2` to manually return such children to the parent.
 
   See "Restart flow" for details on restarting procedure.
   """
@@ -388,7 +392,9 @@ defmodule Parent do
         raise "trying to terminate an unknown child"
 
       {:ok, children, state} ->
+        opts = Keyword.merge([include_temporary?: true], opts)
         children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
+        children = Stream.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_id))
         {stopped_children, state} = do_return_children(state, stopped_children(children), opts)
         store(state)
         stopped_children
@@ -396,12 +402,20 @@ defmodule Parent do
   end
 
   @doc """
-  Starts new instances of terminated children.
+  Starts new instances of stopped children.
 
-  The children's startup position will be restored.
+  This function can be invoked to return stopped children back to the parent. Essentially, this
+  function behaves almost the same as automatic restart, with a difference that temporary children
+  are by default also returned. You can change this behaviour by passing `include_temporary?:
+  false`.
+
+  The `stopped_children` information is obtained via functions such as `shutdown_child/1` or
+  `shutdown_all/1`. In addition, Parent will provide this info via `handle_message/1`  when some
+  children are terminated and not returned to the parent.
   """
   @spec return_children(stopped_children, restart_opts) :: stopped_children
   def return_children(stopped_children, opts \\ []) do
+    opts = Keyword.merge([include_temporary?: true], opts)
     {stopped_children, state} = do_return_children(state(), stopped_children, opts)
     store(state)
     stopped_children
@@ -787,10 +801,11 @@ defmodule Parent do
         end
       )
 
-    {ignored_children, children_to_start} =
+    {children_to_start, ignored_children} =
       Enum.split_with(
         children_to_start,
-        &(&1.spec.restart == :temporary and not Keyword.get(opts, :include_temporary?, false))
+        &(&1[:force_restart?] == true or &1.spec.restart != :temporary or
+            Keyword.get(opts, :include_temporary?, false))
       )
 
     # return children until the first fails

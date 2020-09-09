@@ -56,18 +56,19 @@ defmodule Parent.Client do
           {:ok, Parent.stopped_children()} | {:error, :unknown_child}
   def shutdown_child(parent, child_id), do: call(parent, {:shutdown_child, child_id}, :infinity)
 
-  @spec restart_child(GenServer.server(), Parent.child_id()) ::
+  @spec restart_child(GenServer.server(), Parent.child_id(), Parent.restart_opts()) ::
           {:ok, Parent.stopped_children()} | {:error, :unknown_child}
-  def restart_child(parent, child_id), do: call(parent, {:restart_child, child_id}, :infinity)
+  def restart_child(parent, child_id, opts \\ []),
+    do: call(parent, {:restart_child, child_id, opts}, :infinity)
 
   @spec shutdown_all(GenServer.server()) :: Parent.stopped_children()
   def shutdown_all(server), do: call(server, :shutdown_all, :infinity)
 
-  @spec return_children(GenServer.server(), Parent.stopped_children()) ::
+  @spec return_children(GenServer.server(), Parent.stopped_children(), Parent.restart_opts()) ::
           {:ok, Parent.stopped_children()}
           | {:error, :unknown_child}
-  def return_children(parent, stopped_children),
-    do: call(parent, {:return_children, stopped_children}, :infinity)
+  def return_children(parent, stopped_children, opts \\ []),
+    do: call(parent, {:return_children, stopped_children, opts}, :infinity)
 
   @spec update_child_meta(
           GenServer.server(),
@@ -90,14 +91,14 @@ defmodule Parent.Client do
       else: {:error, :unknown_child}
   end
 
-  def handle_request({:restart_child, child_id}) do
+  def handle_request({:restart_child, child_id, opts}) do
     if Parent.child?(child_id),
-      do: Parent.restart_child(child_id),
+      do: Parent.restart_child(child_id, opts),
       else: {:error, :unknown_child}
   end
 
-  def handle_request({:return_children, stopped_children}),
-    do: Parent.return_children(stopped_children)
+  def handle_request({:return_children, stopped_children, opts}),
+    do: Parent.return_children(stopped_children, opts)
 
   def handle_request({:update_child_meta, child_id, updater}),
     do: Parent.update_child_meta(child_id, updater)

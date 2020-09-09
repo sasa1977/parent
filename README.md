@@ -65,6 +65,18 @@ Parent.Supervisor.start_link(
 - if `Child2`, `Child3`, or `Child7` is restarted, nothing else is restarted
 - if any of `Child4`, `Child5`, or `Child6` is restarted, all other processes from the shutdown group are restarted too
 
+### Pausing and resuming a part of the system
+
+```elixir
+# stops child1 and all children depending on it
+stopped_children = Parent.Client.stop_child(some_parent, :child1)
+
+# ...
+
+# returns all stopped children back to the parent
+Parent.Client.return_children(some_parent, stopped_children)
+```
+
 ### Dynamic supervisor with child discovery
 
 ```elixir

@@ -311,23 +311,34 @@ defmodule ParentTest do
       assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
 
-    test "also restarts non-temporary bound siblings" do
+    test "by default restarts all bound siblings" do
       Parent.initialize()
 
       child1 = start_child!(id: :child1, shutdown_group: :group1)
       child2 = start_child!(id: :child2, binds_to: [:child1])
-      start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
+      child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
       child4 = start_child!(id: :child4, shutdown_group: :group1)
       child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
       child6 = start_child!(id: :child6)
 
-      assert assert %{child3: _} = Parent.restart_child(:child4)
+      assert Parent.restart_child(:child4) == %{}
 
       refute child_pid!(:child1) == child1
       refute child_pid!(:child2) == child2
+      refute child_pid!(:child3) == child3
       refute child_pid!(:child4) == child4
       refute child_pid!(:child5) == child5
       assert child_pid!(:child6) == child6
+    end
+
+    test "skips temporary bound siblings with include_temporary?: false" do
+      Parent.initialize()
+
+      start_child!(id: :child1, restart: :temporary)
+      start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
+
+      assert %{child2: _} = Parent.restart_child(:child1, include_temporary?: false)
+      assert [%{id: :child1}] = Parent.children()
     end
 
     test "fails if the parent is not initialized" do
