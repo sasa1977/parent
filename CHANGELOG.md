@@ -2,6 +2,7 @@
 
 ## Breaking changes
 
+- Requires Elixir 1.10+
 - Callback `GenServer.handle_child_terminated` has been renamed to `GenServer.handle_stopped_children`. In addition, the callback now receives only two arguments. Refer to documentation for details.
 - Children are by default permanent, so they are automatically restarted. To retain the previous behaviour of your existing parent processes you need to explicitly set the `:restart` option of your children to `:temporary`.
 - `Parent.await_child_termination/2` is removed.

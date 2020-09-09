@@ -897,7 +897,7 @@ defmodule Parent do
       )
 
     children_to_stop =
-      children_to_stop |> List.flatten() |> Enum.sort_by(& &1.startup_index, &>=/2)
+      children_to_stop |> List.flatten() |> Enum.sort_by(& &1.startup_index, :desc)
 
     Enum.each(children_to_stop, &stop_child(&1, :shutdown))
 
