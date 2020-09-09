@@ -81,9 +81,10 @@ defmodule Parent.GenServerTest do
     server = start_server!(name: :my_server, children: [child_spec(id: :child)])
 
     :erlang.trace(server, true, [:call])
-    :erlang.trace_pattern({Parent, :do_return_children, 3}, [], [:local])
+    Code.ensure_loaded(Parent.Restart)
+    :erlang.trace_pattern({Parent.Restart, :perform, :_}, [])
     Agent.stop(child_pid!(server, :child))
-    assert_receive {:trace, ^server, :call, {Parent, :do_return_children, _args}}
+    assert_receive {:trace, ^server, :call, {Parent.Restart, :perform, _args}}
 
     assert child_ids(server) == [:child]
   end

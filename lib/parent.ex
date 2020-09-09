@@ -248,7 +248,7 @@ defmodule Parent do
   """
   require Logger
 
-  alias Parent.{Registry, State}
+  alias Parent.{Registry, Restart, State}
 
   @type opts :: [option]
   @type option ::
@@ -393,9 +393,9 @@ defmodule Parent do
 
       {:ok, children, state} ->
         opts = Keyword.merge([include_temporary?: true], opts)
-        children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
+        stop_children(children, :shutdown)
         children = Stream.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_id))
-        {stopped_children, state} = do_return_children(state, stopped_children(children), opts)
+        {stopped_children, state} = Restart.perform(state, children, opts)
         store(state)
         stopped_children
     end
@@ -416,7 +416,7 @@ defmodule Parent do
   @spec return_children(stopped_children, restart_opts) :: stopped_children
   def return_children(stopped_children, opts \\ []) do
     opts = Keyword.merge([include_temporary?: true], opts)
-    {stopped_children, state} = do_return_children(state(), stopped_children, opts)
+    {stopped_children, state} = Restart.perform(state(), Map.values(stopped_children), opts)
     store(state)
     stopped_children
   end
@@ -437,7 +437,7 @@ defmodule Parent do
         raise "trying to terminate an unknown child"
 
       {:ok, children, state} ->
-        children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
+        stop_children(children, :shutdown)
         store(state)
         children |> Stream.map(&{&1.spec.id, &1}) |> Map.new()
     end
@@ -451,15 +451,10 @@ defmodule Parent do
   """
   @spec shutdown_all(term) :: stopped_children
   def shutdown_all(reason \\ :shutdown) do
-    reason = with :normal <- reason, do: :shutdown
-
-    children = State.children(state())
-
-    children
-    |> Enum.reverse()
-    |> Enum.each(&stop_child(&1, reason))
-
-    store(State.reinitialize(state()))
+    state = state()
+    children = State.children(state)
+    stop_children(children, with(:normal <- reason, do: :shutdown))
+    store(State.reinitialize(state))
     stopped_children(children)
   end
 
@@ -633,7 +628,8 @@ defmodule Parent do
     end
   end
 
-  defp start_child_process(state, child_spec) do
+  @doc false
+  def start_child_process(state, child_spec) do
     with :ok <- check_bindings(state, child_spec),
          {:ok, pid} <- invoke_start_function(child_spec.start) do
       timer_ref =
@@ -733,7 +729,7 @@ defmodule Parent do
   end
 
   defp do_handle_message(state, {__MODULE__, :resume_restart, stopped_children}),
-    do: auto_return(state, stopped_children)
+    do: auto_restart(state, stopped_children)
 
   defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
     GenServer.reply(client, supervisor_which_children())
@@ -762,17 +758,17 @@ defmodule Parent do
       |> Stream.reject(&(&1.spec.id == child.spec.id))
       |> Enum.map(&Map.put(&1, :exit_reason, :shutdown))
 
-    Enum.each(Enum.reverse(bound_siblings), &stop_child(&1, :shutdown))
+    stop_children(bound_siblings, :shutdown)
     stopped_children = stopped_children([child | bound_siblings])
 
     if child.spec.restart == :permanent or
          (child.spec.restart == :transient and reason != :normal),
-       do: auto_return(state, stopped_children),
+       do: auto_restart(state, stopped_children),
        else: {{:stopped_children, stopped_children}, state}
   end
 
-  defp auto_return(state, stopped_children) do
-    {stopped_children, state} = do_return_children(state, stopped_children)
+  defp auto_restart(state, stopped_children) do
+    {stopped_children, state} = Restart.perform(state, Map.values(stopped_children))
 
     if map_size(stopped_children) == 0,
       # all children successfully returned
@@ -780,145 +776,23 @@ defmodule Parent do
       else: {{:stopped_children, stopped_children}, state}
   end
 
-  # core logic of all restarts, both automatic and manual
-  defp do_return_children(state, stopped_children, opts \\ []) do
-    {children_to_start, state} =
-      stopped_children
-      |> Map.values()
-      # reject already started children (idempotence)
-      |> Stream.reject(&State.child?(state, id: &1.spec.id))
-      |> Enum.sort_by(& &1.startup_index)
-      # record restart where required
-      |> Enum.flat_map_reduce(
-        state,
-        fn
-          %{record_restart?: true} = child, state ->
-            {child, state} = record_restart!(state, child)
-            {[child], state}
-
-          child, state ->
-            {[child], state}
-        end
-      )
-
-    {children_to_start, ignored_children} =
-      Enum.split_with(
-        children_to_start,
-        &(&1[:force_restart?] == true or &1.spec.restart != :temporary or
-            Keyword.get(opts, :include_temporary?, false))
-      )
-
-    # return children until the first fails
-    {non_started_children, state, start_error} =
-      return_children_while_ok(state, children_to_start)
-
-    # stop successfully started children which are bound to non-started ones
-    {extra_stopped_children, state} =
-      stop_children_in_shutdown_groups(state, shutdown_groups(non_started_children))
-
-    stopped_children =
-      if non_started_children == [] do
-        stopped_children(ignored_children)
-      else
-        [failed_child | other_children] = non_started_children
-
-        {ignored_children, children_to_restart} =
-          other_children
-          |> Stream.concat(extra_stopped_children)
-          |> Stream.concat(ignored_children)
-          |> Stream.map(&Map.put(&1, :exit_reason, :shutdown))
-          |> Stream.concat([
-            Map.merge(failed_child, %{exit_reason: start_error, record_restart?: true})
-          ])
-          |> Enum.split_with(&(&1.spec.restart == :temporary))
-
-        unless Enum.empty?(children_to_restart),
-          # the first failed child is not temporary -> deferred auto-restart
-          do: send(self(), {__MODULE__, :resume_restart, stopped_children(children_to_restart)})
-
-        stopped_children(ignored_children)
-      end
-
-    {stopped_children, state}
-  end
-
-  defp stopped_children(children),
+  @doc false
+  def stopped_children(children),
     do: children |> Stream.map(&{&1.spec.id, &1}) |> Map.new()
 
-  defp return_children_while_ok(state, []), do: {[], state, nil}
-
-  defp return_children_while_ok(state, [child | children]) do
-    case return_child(state, child) do
-      {:ok, state} -> return_children_while_ok(state, children)
-      {:error, start_error} -> {[child | children], state, start_error}
-    end
-  end
-
-  defp return_child(state, child) do
-    case start_child_process(state, child.spec) do
-      {:ok, new_pid, timer_ref} ->
-        {:ok, State.reregister_child(state, child, new_pid, timer_ref)}
-
-      :ignore ->
-        {:ok, state}
-
-      error ->
-        error
-    end
-  end
-
-  defp shutdown_groups(children) do
-    children
-    |> Stream.map(& &1.spec.shutdown_group)
-    |> Stream.reject(&is_nil/1)
-    |> MapSet.new()
-  end
-
-  defp stop_children_in_shutdown_groups(state, shutdown_groups) do
-    {children_to_stop, state} =
-      Enum.reduce(
-        shutdown_groups,
-        {[], state},
-        fn group, {stopped, state} ->
-          state
-          |> State.children()
-          |> Enum.find(&(&1.spec.shutdown_group == group))
-          |> case do
-            nil ->
-              {stopped, state}
-
-            child ->
-              {:ok, children, state} =
-                State.pop_child_with_bound_siblings(state, id: child.spec.id)
-
-              {[children | stopped], state}
-          end
-        end
-      )
-
-    children_to_stop =
-      children_to_stop |> List.flatten() |> Enum.sort_by(& &1.startup_index, :desc)
-
-    Enum.each(children_to_stop, &stop_child(&1, :shutdown))
-
-    {children_to_stop, state}
-  end
-
-  defp record_restart!(state, child) do
-    with {:ok, state} <- State.record_restart(state),
-         {:ok, restart_counter} <- Parent.RestartCounter.record_restart(child.restart_counter) do
-      {%{child | restart_counter: restart_counter}, state}
-    else
-      _ ->
-        give_up!(state, :too_many_restarts, "Too many restarts in parent process.")
-    end
-  end
-
-  defp give_up!(state, exit, error) do
+  @doc false
+  def give_up!(state, exit, error) do
     Logger.error(error)
     store(state)
     shutdown_all()
     exit(exit)
+  end
+
+  @doc false
+  def stop_children(children, reason) do
+    children
+    |> Enum.sort_by(& &1.startup_index, :desc)
+    |> Enum.each(&stop_child(&1, reason))
   end
 
   defp stop_child(child, reason) do
