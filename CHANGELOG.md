@@ -1,8 +1,9 @@
 # 0.11.0
 
 ## Breaking changes
-- Children are by default permanent, so they are automatically restarted. This also means that `GenServer.handle_child_terminated` won't be invoked. To retain the previous behaviour of your existing parent processes you need to explicitly set the `:restart` option of your children to `:temporary`.
-- `handle_child_terminated/5` callback of `Parent.GenServer` is replaced with `handle_child_terminated/2`.
+
+- Callback `GenServer.handle_child_terminated` has been renamed to `GenServer.handle_stopped_children`. In addition, the callback now receives only two arguments. Refer to documentation for details.
+- Children are by default permanent, so they are automatically restarted. To retain the previous behaviour of your existing parent processes you need to explicitly set the `:restart` option of your children to `:temporary`.
 - `Parent.await_child_termination/2` is removed.
 - Return type of functions `Parent.children/0`, `Parent.handle_message/1`, `Parent.shutdown_child/1`, `Parent.restart_child/1` has changed. Refer to documentation for details.
 - Previously deprecated `Parent.GenServer` functions are removed.

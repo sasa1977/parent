@@ -358,9 +358,11 @@ defmodule Periodic do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(info, state) do
+  def handle_stopped_children(info, state) do
+    [info] = Map.values(info)
+
     with from when not is_nil(from) <- info.meta.caller,
-         do: GenServer.reply(from, {:ok, info.reason})
+         do: GenServer.reply(from, {:ok, info.exit_reason})
 
     if state.delay_mode == :shifted, do: enqueue_next_tick(state, state.every)
 
@@ -371,7 +373,7 @@ defmodule Periodic do
         :microsecond
       )
 
-    telemetry(state, :finished, %{job: info.pid, reason: info.reason}, %{time: duration})
+    telemetry(state, :finished, %{job: info.pid, reason: info.exit_reason}, %{time: duration})
     {:noreply, state}
   end
 

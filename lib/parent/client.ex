@@ -53,22 +53,21 @@ defmodule Parent.Client do
   def start_child(parent, child_spec), do: call(parent, {:start_child, child_spec}, :infinity)
 
   @spec shutdown_child(GenServer.server(), Parent.child_id()) ::
-          {:ok, Parent.on_shutdown_child()} | {:error, :unknown_child}
+          {:ok, Parent.stopped_children()} | {:error, :unknown_child}
   def shutdown_child(parent, child_id), do: call(parent, {:shutdown_child, child_id}, :infinity)
 
   @spec restart_child(GenServer.server(), Parent.child_id()) ::
-          {:ok, {restarted :: [Parent.child_id()], Parent.return_info() | nil}}
-          | {:error, :unknown_child}
+          {:ok, Parent.stopped_children()} | {:error, :unknown_child}
   def restart_child(parent, child_id), do: call(parent, {:restart_child, child_id}, :infinity)
 
-  @spec shutdown_all(GenServer.server()) :: Parent.return_info()
+  @spec shutdown_all(GenServer.server()) :: Parent.stopped_children()
   def shutdown_all(server), do: call(server, :shutdown_all, :infinity)
 
-  @spec return_children(GenServer.server(), Parent.return_info()) ::
-          {:ok, {restarted :: [Parent.child_id()], Parent.return_info() | nil}}
+  @spec return_children(GenServer.server(), Parent.stopped_children()) ::
+          {:ok, Parent.stopped_children()}
           | {:error, :unknown_child}
-  def return_children(parent, return_info),
-    do: call(parent, {:return_children, return_info}, :infinity)
+  def return_children(parent, stopped_children),
+    do: call(parent, {:return_children, stopped_children}, :infinity)
 
   @spec update_child_meta(
           GenServer.server(),
@@ -97,8 +96,8 @@ defmodule Parent.Client do
       else: {:error, :unknown_child}
   end
 
-  def handle_request({:return_children, return_info}),
-    do: Parent.return_children(return_info)
+  def handle_request({:return_children, stopped_children}),
+    do: Parent.return_children(stopped_children)
 
   def handle_request({:update_child_meta, child_id, updater}),
     do: Parent.update_child_meta(child_id, updater)

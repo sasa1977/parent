@@ -59,10 +59,10 @@ defmodule Parent.GenServer do
 
   ## Handling child termination
 
-  If a child process terminates and isn't restarted, the `c:handle_child_terminated/2` callback is
+  If a child process terminates and isn't restarted, the `c:handle_stopped_children/2` callback is
   invoked. The default implementation does nothing.
 
-  The following example uses `c:handle_child_terminated/2` to start a child task and report if it
+  The following example uses `c:handle_stopped_children/2` to start a child task and report if it
   it crashes:
 
         defmodule MyJob do
@@ -73,6 +73,7 @@ defmodule Parent.GenServer do
           @impl GenServer
           def init(_) do
             {:ok, _} = Parent.start_child(%{
+              id: :job,
               start: {Task, :start_link, [fn -> job(arg) end]},
               restart: :temporary
             })
@@ -80,7 +81,7 @@ defmodule Parent.GenServer do
           end
 
           @impl Parent.GenServer
-          def handle_child_terminated(info, state) do
+          def handle_stopped_children(%{job: info}, state) do
             if info.reason != :normal do
               # report job failure
             end
@@ -89,22 +90,22 @@ defmodule Parent.GenServer do
           end
         end
 
-  `handle_child_terminated` can be useful to implement arbitrary custom behaviour, such as
+  `handle_stopped_children` can be useful to implement arbitrary custom behaviour, such as
   restarting after a delay, and using incremental backoff periods between two consecutive starts.
 
   For example, this is how you could introduce a delay between two consecutive starts:
 
-      def handle_child_terminated(info, state) do
-        Process.send_after(self, {:restart, info.return_info}, delay)
+      def handle_stopped_children(stopped_children, state) do
+        Process.send_after(self, {:restart, stopped_children}, delay)
         {:noreply, state}
       end
 
-      def handle_info({:restart, return_info}, state) do
-        Parent.return_children(return_info)
+      def handle_info({:restart, stopped_children}, state) do
+        Parent.return_children(stopped_children)
         {:noreply, state}
       end
 
-  Keep in mind that `handle_child_terminated` is only invoked if the child crashed on its own,
+  Keep in mind that `handle_stopped_children` is only invoked if the child crashed on its own,
   and if it's not going to be restarted.
 
   If the child was explicitly stopped via a `Parent` function, such as `Parent.shutdown_child/1`,
@@ -113,10 +114,10 @@ defmodule Parent.GenServer do
   and add a corresponding `handle_info` clause.
 
   If the child was taken down because its lifecycle is bound to some other process, the
-  corresponding `handle_child_terminated` won't be invoked. For example, if process A is bound to
-  process B, and process B crashes, only one `handle_child_terminated` will be invoked (for the
+  corresponding `handle_stopped_children` won't be invoked. For example, if process A is bound to
+  process B, and process B crashes, only one `handle_stopped_children` will be invoked (for the
   crash of process B). However, the corresponding `info` will contain the list of all associated
-  siblings that have been taken down, and `return_info` will include information necessary to
+  siblings that have been taken down, and `stopped_children` will include information necessary to
   restart all of these siblings. Refer to `Parent` documentation for details on lifecycles binding.
 
   ## Parent termination
@@ -157,15 +158,19 @@ defmodule Parent.GenServer do
   @type options :: [Parent.option() | GenServer.option()]
 
   @doc """
-  Invoked when a child has terminated.
+  Invoked when some children have terminated.
+
+  The `info` map will contain all the children which have been stopped together. For example,
+  if child A is bound to child B, and child B terminates, parent will also terminate the child
+  A. In this case, `handle_stopped_children` is invoked only once, with the `info` map containing
+  entries for both children.
 
   This callback will not be invoked in the following cases:
 
     - a child is terminated by invoking `Parent` functions such as `Parent.shutdown_child/1`
-    - a child is implicitly terminated by `Parent` because its dependency has stopped
     - a child is restarted
   """
-  @callback handle_child_terminated(info :: Parent.child_termination_info(), state) ::
+  @callback handle_stopped_children(info :: Parent.stopped_children(), state) ::
               {:noreply, new_state}
               | {:noreply, new_state, timeout | :hibernate}
               | {:stop, reason :: term, new_state}
@@ -193,8 +198,8 @@ defmodule Parent.GenServer do
   @impl GenServer
   def handle_info(message, state) do
     case Parent.handle_message(message) do
-      {:child_terminated, info} ->
-        invoke_callback(:handle_child_terminated, [info, state])
+      {:stopped_children, info} ->
+        invoke_callback(:handle_stopped_children, [info, state])
 
       :ignore ->
         {:noreply, state}
@@ -270,7 +275,7 @@ defmodule Parent.GenServer do
       end
 
       @impl behaviour
-      def handle_child_terminated(_info, state), do: {:noreply, state}
+      def handle_stopped_children(_info, state), do: {:noreply, state}
 
       @impl GenServer
       # automatic ignoring of `:EXIT` messages which may occur if a child crashes during its `start_link`
@@ -303,7 +308,7 @@ defmodule Parent.GenServer do
         {:noreply, state}
       end
 
-      defoverridable handle_info: 2, handle_child_terminated: 2, child_spec: 1
+      defoverridable handle_info: 2, handle_stopped_children: 2, child_spec: 1
     end
   end
 end

@@ -61,26 +61,20 @@ defmodule Parent.GenServerTest do
     assert [pid1, pid2, pid3] == [child2, child1, server]
   end
 
-  test "invokes handle_child_terminated/2 when a temporary worker stops" do
+  test "invokes handle_stopped_children/2 when a temporary worker stops" do
     server = start_server!()
 
     child = start_child!(server, id: :child, meta: :meta, restart: :temporary)
 
     :erlang.trace(server, true, [:call])
-    :erlang.trace_pattern({TestServer, :handle_child_terminated, 2}, [])
+    :erlang.trace_pattern({TestServer, :handle_stopped_children, 2}, [])
 
     Process.exit(child, :kill)
 
     assert_receive {:trace, ^server, :call,
-                    {Parent.TestServer, :handle_child_terminated, [info, :initial_state]}}
+                    {Parent.TestServer, :handle_stopped_children, [info, :initial_state]}}
 
-    assert Map.delete(info, :return_info) == %{
-             id: :child,
-             pid: child,
-             meta: :meta,
-             reason: :killed,
-             also_terminated: []
-           }
+    assert %{child: %{pid: pid, meta: meta, exit_reason: killed}} = info
   end
 
   test "restarts the child automatically" do

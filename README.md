@@ -121,22 +121,22 @@ defmodule MySup do
 
   @impl GenServer
   def init(_init_arg) do
-    # Make sure that children are temporary b/c otherwise `handle_child_terminated/2` won't be invoked.
+    # Make sure that children are temporary b/c otherwise `handle_stopped_children/2` won't be invoked.
     Parent.start_all_children!(children)
     {:ok, initial_state}
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(info, state) do
+  def handle_stopped_children(stopped_children, state) do
     # invoked when a child stops and is not restarted
-    Process.send_after(self, {:restart, info.return_info}, delay)
+    Process.send_after(self, {:restart, stopped_children}, delay)
     {:noreply, state}
   end
 
-  def handle_info({:restart, return_info}, state) do
+  def handle_info({:restart, stopped_children}, state) do
     # Returns the child to the parent preserving its place according to startup order and bumping
     # its restart count. This is basically a manual restart.
-    Parent.return_children(return_info)
+    Parent.return_children(stopped_children)
     {:noreply, state}
   end
 end
@@ -158,10 +158,12 @@ defmodule MySup do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(info, state) do
-    if info.id == Child1, do: Parent.start_child(other_children)
+  def handle_stopped_children(%{child1: info}, state) do
+    Parent.start_child(other_children)
     {:noreply, state}
   end
+
+  def handle_stopped_children(_other, state), do: {:noreply, state}
 end
 ```
 
@@ -182,7 +184,7 @@ defp loop() do
         :ignore -> loop()
 
         # parent handled the message and returned some useful information
-        {:child_termination_info, info} -> handle_child_termination(info)
+        {:stopped_children, stopped_children} -> handle_stopped_children(stopped_children)
 
         # not a parent message
         nil -> custom_handle_message(msg)

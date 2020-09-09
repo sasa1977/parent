@@ -170,8 +170,7 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child)
 
-      assert Map.delete(Parent.shutdown_child(:child), :return_info) ==
-               %{terminated_children: [:child]}
+      assert Map.keys(Parent.shutdown_child(:child)) == [:child]
 
       refute Process.alive?(child)
       refute_receive {:EXIT, ^child, _reason}
@@ -243,9 +242,7 @@ defmodule ParentTest do
 
       Enum.each([child1, child2, child3, child4, child5], &Process.monitor/1)
 
-      assert Parent.shutdown_child(:child4).terminated_children ==
-               ~w/child1 child2 child3 child4 child5/a
-
+      assert Map.keys(Parent.shutdown_child(:child4)) == ~w/child1 child2 child3 child4 child5/a
       assert [%{id: :child6}] = Parent.children()
 
       pids =
@@ -266,7 +263,7 @@ defmodule ParentTest do
     test "restarts the process and returns the new pid" do
       Parent.initialize()
       child = start_child!(id: :child)
-      assert Parent.restart_child(:child) == {[:child], nil}
+      assert Parent.restart_child(:child) == %{}
       refute child_pid!(:child) == child
     end
 
@@ -276,7 +273,7 @@ defmodule ParentTest do
       _child2 = start_child!(id: :child2)
       child3 = start_child!(id: :child3)
 
-      {[:child2], nil} = Parent.restart_child(:child2)
+      Parent.restart_child(:child2)
       {:ok, child2} = Parent.child_pid(:child2)
       assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
@@ -291,7 +288,7 @@ defmodule ParentTest do
       child5 = start_child!(id: :child5, shutdown_group: :group2)
       child6 = start_child!(id: :child6)
 
-      assert Parent.restart_child(:child4) == {~w/child1 child2 child3 child4 child5/a, nil}
+      assert Parent.restart_child(:child4) == %{}
 
       refute child_pid!(:child1) == child1
       refute child_pid!(:child2) == child2
@@ -299,6 +296,20 @@ defmodule ParentTest do
       refute child_pid!(:child4) == child4
       refute child_pid!(:child5) == child5
       assert child_pid!(:child6) == child6
+    end
+
+    test "returns temporary children which failed to start" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
+      start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
+
+      raise_on_child_start(:child2)
+      assert stopped_children = Parent.restart_child(:child1)
+      assert Map.keys(stopped_children) == ~w/child2 child3/a
+      assert {%RuntimeError{message: "error"}, _stack} = stopped_children.child2.exit_reason
+      assert stopped_children.child3.exit_reason == :shutdown
+      assert [%{id: :child1}] = Parent.children()
     end
 
     test "fails if the parent is not initialized" do
@@ -391,12 +402,12 @@ defmodule ParentTest do
       Parent.initialize()
 
       child1 = start_child!(id: :child1)
-      child2 = start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
+      start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
 
       Process.exit(child1, :kill)
       raise_on_child_start(:child2)
 
-      assert {:child_terminated, %{pid: ^child2}} = handle_parent_message()
+      assert {:stopped_children, %{child2: _}} = handle_parent_message()
       assert [%{id: :child1}] = Parent.children()
     end
 
@@ -532,15 +543,15 @@ defmodule ParentTest do
       assert [pid1, pid2, pid3] == [child3, child2, child1]
     end
 
-    test "returns return_info that can be passed to return_children/1" do
+    test "returns stopped_children that can be passed to return_children/1" do
       Parent.initialize()
 
       start_child!(id: :child1)
       start_child!(id: :child2)
       start_child!(id: :child3)
 
-      return_info = Parent.shutdown_all()
-      assert Parent.return_children(return_info) == {~w/child1 child2 child3/a, nil}
+      stopped_children = Parent.shutdown_all()
+      assert Parent.return_children(stopped_children) == %{}
       assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2 child3/a
     end
 
@@ -718,15 +729,12 @@ defmodule ParentTest do
       child = start_child!(id: :child, meta: :meta, restart: :temporary)
       GenServer.stop(child)
 
-      assert {:child_terminated, info} = handle_parent_message()
+      assert {:stopped_children, info} = handle_parent_message()
 
-      assert Map.delete(info, :return_info) == %{
-               id: :child,
-               meta: :meta,
-               pid: child,
-               reason: :normal,
-               also_terminated: []
-             }
+      assert [{:child, info}] = Map.to_list(info)
+      assert info.pid == child
+      assert info.exit_reason == :normal
+      assert info.meta == :meta
 
       assert Parent.num_children() == 0
       assert Parent.children() == []
@@ -746,12 +754,8 @@ defmodule ParentTest do
 
       GenServer.stop(child1)
 
-      assert {:child_terminated, info} = handle_parent_message()
-
-      assert info.also_terminated == [
-               %{id: :child2, meta: nil, pid: child2},
-               %{id: :child3, meta: nil, pid: child3}
-             ]
+      assert {:stopped_children, info} = handle_parent_message()
+      assert Map.keys(info) == ~w/child1 child2 child3/a
 
       assert Parent.num_children() == 1
       assert [%{id: :child4}] = Parent.children()
@@ -765,15 +769,8 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
 
-      assert {:child_terminated, info} = handle_parent_message()
-
-      assert Map.delete(info, :return_info) == %{
-               id: :child,
-               meta: :meta,
-               pid: child,
-               reason: :timeout,
-               also_terminated: []
-             }
+      assert {:stopped_children, info} = handle_parent_message()
+      assert %{child: %{exit_reason: :timeout}} = info
 
       assert Parent.num_children() == 0
       assert Parent.children() == []
@@ -826,10 +823,9 @@ defmodule ParentTest do
       start_child!(id: :child1)
       child2 = start_child!(id: :child2)
       start_child!(id: :child3, binds_to: [:child1])
-      return_info = Parent.shutdown_child(:child1).return_info
+      stopped_children = Parent.shutdown_child(:child1)
 
-      assert {started, nil} = Parent.return_children(return_info)
-      assert started == ~w/child1 child3/a
+      assert Parent.return_children(stopped_children) == %{}
 
       assert [
                %{id: :child1, pid: child1},
@@ -859,10 +855,10 @@ defmodule ParentTest do
       start_child!(id: :child5, binds_to: [:child3])
       start_child!(id: :child6, binds_to: [:child5], shutdown_group: :group1)
 
-      return_info = Parent.shutdown_child(:child1).return_info
+      stopped_children = Parent.shutdown_child(:child1)
       raise_on_child_start(:child5)
 
-      assert Parent.return_children(return_info) == {~w/child1 child2/a, nil}
+      assert Parent.return_children(stopped_children) == %{}
       assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2/a
 
       succeed_on_child_start(:child5)
@@ -874,27 +870,27 @@ defmodule ParentTest do
                ~w/child1 child2 child3 child4 child5 child6/a
     end
 
-    test "returns return_info if process which failed to start is temporary" do
+    test "returns stopped_children if process which failed to start is temporary" do
       Parent.initialize()
       start_child!(id: :child1)
       start_child!(id: :child2, binds_to: [:child1], restart: :temporary)
       start_child!(id: :child3, binds_to: [:child1], restart: :temporary)
 
-      return_info = Parent.shutdown_child(:child1).return_info
+      stopped_children = Parent.shutdown_child(:child1)
       raise_on_child_start(:child2)
 
-      assert {[:child1], return_info} = Parent.return_children(return_info)
+      stopped_children = Parent.return_children(stopped_children)
+      assert Map.keys(stopped_children) == ~w/child2 child3/a
       assert Enum.map(Parent.children(), & &1.id) == [:child1]
-      assert Parent.children_to_return(return_info) == ~w/child2 child3/a
     end
 
     test "is idempotent" do
       Parent.initialize()
       start_child!(id: :child1, restart: :temporary)
       start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
-      return_info = provoke_child_termination!(:child1, at: 0).return_info
-      assert Parent.return_children(return_info) == {~w/child1 child2/a, nil}
-      assert Parent.return_children(return_info) == {[], nil}
+      stopped_children = provoke_child_termination!(:child1, at: 0)
+      assert Parent.return_children(stopped_children) == %{}
+      assert Parent.return_children(stopped_children) == %{}
       assert [%{id: :child1}, %{id: :child2}] = Parent.children()
     end
 
@@ -904,14 +900,14 @@ defmodule ParentTest do
       start_child!(id: :child2)
       start_child!(id: :child3, binds_to: [:child1], restart: :temporary, max_restarts: 1)
 
-      return_info = provoke_child_termination!(:child3, at: 0).return_info
-      Parent.return_children(return_info)
+      stopped_children = provoke_child_termination!(:child3, at: 0)
+      Parent.return_children(stopped_children)
 
-      return_info = provoke_child_termination!(:child3, at: 0).return_info
+      stopped_children = provoke_child_termination!(:child3, at: 0)
 
       log =
         assert_parent_exit(
-          fn -> Parent.return_children(return_info) end,
+          fn -> Parent.return_children(stopped_children) end,
           :too_many_restarts
         )
 
@@ -937,7 +933,7 @@ defmodule ParentTest do
     Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> now_ms end)
     {:ok, pid} = Parent.child_pid(child_id)
     Process.exit(pid, Keyword.get(opts, :reason, :shutdown))
-    {:child_terminated, terminated_info} = handle_parent_message()
+    {:stopped_children, terminated_info} = handle_parent_message()
     terminated_info
   end
 
