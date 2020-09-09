@@ -145,6 +145,11 @@ defmodule Parent.GenServer do
 
   Finally, since parent trap exits, it's possible to receive an occasional stray `:EXIT` message
   if the child crashes during its initialization.
+
+  By default `use Parent.GenServer` receives such messages and ignores them. If you're implementing
+  your own `handle_info`, make sure to include a clause for `:EXIT` messages:
+
+        def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
   """
   use GenServer
 
@@ -267,7 +272,38 @@ defmodule Parent.GenServer do
       @impl behaviour
       def handle_child_terminated(_info, state), do: {:noreply, state}
 
-      defoverridable handle_child_terminated: 2, child_spec: 1
+      @impl GenServer
+      # automatic ignoring of `:EXIT` messages which may occur if a child crashes during its `start_link`
+      def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+
+      def handle_info(msg, state) do
+        # copied over from `GenServer`, b/c calling `super` is not allowed
+        proc =
+          case Process.info(self(), :registered_name) do
+            {_, []} -> self()
+            {_, name} -> name
+          end
+
+        :logger.error(
+          %{
+            label: {GenServer, :no_handle_info},
+            report: %{
+              module: __MODULE__,
+              message: msg,
+              name: proc
+            }
+          },
+          %{
+            domain: [:otp, :elixir],
+            error_logger: %{tag: :error_msg},
+            report_cb: &GenServer.format_report/1
+          }
+        )
+
+        {:noreply, state}
+      end
+
+      defoverridable handle_info: 2, handle_child_terminated: 2, child_spec: 1
     end
   end
 end
