@@ -136,7 +136,7 @@ defmodule MySup do
   def handle_info({:restart, stopped_children}, state) do
     # Returns the child to the parent preserving its place according to startup order and bumping
     # its restart count. This is basically a manual restart.
-    Parent.return_children(stopped_children)
+    Parent.return_children(stopped_children, include_temporary?: true)
     {:noreply, state}
   end
 end

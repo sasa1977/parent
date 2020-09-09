@@ -132,9 +132,10 @@ defmodule Parent do
   returning terminated non-restarted children with the function `return_children/2`. In all these
   situations, the flow is the same.
 
-  In general, the parent is always restarting multiple processes: a terminated child and siblings
-  bound to it. This is done by starting processes synchronously, one by one, in their startup
-  order. If all processes are started successfully, restart has succeeded.
+  When a child stops, parent will take down all the siblings bound to it, and then attempt to
+  restart the child and its non-temporary siblings. This is done by starting processes
+  synchronously, one by one, in their startup order. If all processes are started successfully,
+  restart has succeeded.
 
   If some process fails to start, the parent won't try to start younger siblings. If some of the
   successfully started children are bound to non-started siblings, they will be taken down as well.
@@ -142,16 +143,11 @@ defmodule Parent do
   requirements.
 
   Therefore, a restart may partially succeed, with some children not being started. In this case,
-  the parent will retry to restart the remaining children unless the child which failed to start is
-  temporary.
+  the parent will retry to restart the remaining children.
 
   An attempt to restart a child which failed to restart is considered as a crash and contributes to
   the restart intensity. Thus, if a child repeatedly fails to restart, the parent will give up at
   some point, according to restart intensity settings.
-
-  If a child is restarted, all the siblings bound to it will be restarted. This also holds for
-  temporary children. A temporary child which is bound to a permanent child will be restarted if
-  the permanent child restarts.
 
   When the children are restarted, they will be started in the original startup order. The
   restarted children keep their original startup order with respect to non-restarted children. For
@@ -284,6 +280,8 @@ defmodule Parent do
           }
         }
 
+  @type restart_opts :: [include_temporary?: boolean]
+
   @spec child_spec(child_spec, Keyword.t() | child_spec) :: child_spec
   def child_spec(spec, overrides \\ []) do
     spec
@@ -367,15 +365,15 @@ defmodule Parent do
 
   See "Restart flow" for details on restarting procedure.
   """
-  @spec restart_child(child_id) :: stopped_children
-  def restart_child(child_id) do
+  @spec restart_child(child_id, restart_opts) :: stopped_children
+  def restart_child(child_id, opts \\ []) do
     case State.pop_child_with_bound_siblings(state(), id: child_id) do
       :error ->
         raise "trying to terminate an unknown child"
 
       {:ok, children, state} ->
         children |> Enum.reverse() |> Enum.each(&stop_child(&1, :shutdown))
-        {stopped_children, state} = return_children(state, stopped_children(children))
+        {stopped_children, state} = do_return_children(state, stopped_children(children), opts)
         store(state)
         stopped_children
     end
@@ -386,9 +384,9 @@ defmodule Parent do
 
   The children's startup position will be restored.
   """
-  @spec return_children(stopped_children) :: stopped_children
-  def return_children(stopped_children) do
-    {stopped_children, state} = return_children(state(), stopped_children)
+  @spec return_children(stopped_children, restart_opts) :: stopped_children
+  def return_children(stopped_children, opts \\ []) do
+    {stopped_children, state} = do_return_children(state(), stopped_children, opts)
     store(state)
     stopped_children
   end
@@ -738,7 +736,7 @@ defmodule Parent do
   end
 
   defp auto_return(state, stopped_children) do
-    {stopped_children, state} = return_children(state, stopped_children)
+    {stopped_children, state} = do_return_children(state, stopped_children)
 
     if map_size(stopped_children) == 0,
       # all children successfully returned
@@ -752,7 +750,7 @@ defmodule Parent do
   end
 
   # core logic of all restarts, both automatic and manual
-  defp return_children(state, stopped_children) do
+  defp do_return_children(state, stopped_children, opts \\ []) do
     {children_to_start, state} =
       stopped_children
       |> Map.values()
@@ -772,6 +770,12 @@ defmodule Parent do
         end
       )
 
+    {ignored_children, children_to_start} =
+      Enum.split_with(
+        children_to_start,
+        &(&1.spec.restart == :temporary and not Keyword.get(opts, :include_temporary?, false))
+      )
+
     # return children until the first fails
     {non_started_children, state, start_error} =
       return_children_while_ok(state, children_to_start)
@@ -782,27 +786,25 @@ defmodule Parent do
 
     stopped_children =
       if non_started_children == [] do
-        %{}
+        stopped_children(ignored_children)
       else
         [failed_child | other_children] = non_started_children
 
-        stopped_children =
+        {ignored_children, children_to_restart} =
           other_children
           |> Stream.concat(extra_stopped_children)
+          |> Stream.concat(ignored_children)
           |> Stream.map(&Map.put(&1, :exit_reason, :shutdown))
           |> Stream.concat([
             Map.merge(failed_child, %{exit_reason: start_error, record_restart?: true})
           ])
-          |> stopped_children()
+          |> Enum.split_with(&(&1.spec.restart == :temporary))
 
-        if failed_child.spec.restart != :temporary do
+        unless Enum.empty?(children_to_restart),
           # the first failed child is not temporary -> deferred auto-restart
-          send(self(), {__MODULE__, :resume_restart, stopped_children})
-          %{}
-        else
-          # the first failed child is temporary -> no auto-retry
-          stopped_children
-        end
+          do: send(self(), {__MODULE__, :resume_restart, stopped_children(children_to_restart)})
+
+        stopped_children(ignored_children)
       end
 
     {stopped_children, state}
