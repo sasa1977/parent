@@ -74,20 +74,13 @@ defmodule Parent.State do
   end
 
   @spec children(t) :: [child()]
-  def children(state) do
-    state.children
-    |> Map.values()
-    |> Enum.sort_by(& &1.startup_index)
-  end
+  def children(state), do: Map.values(state.children)
 
   @spec children_in_shutdown_group(t, Parent.shutdown_group()) :: [child]
   def children_in_shutdown_group(_state, nil), do: []
 
-  def children_in_shutdown_group(state, shutdown_group) do
-    state.children
-    |> Map.values()
-    |> Enum.filter(&(&1.spec.shutdown_group == shutdown_group))
-  end
+  def children_in_shutdown_group(state, shutdown_group),
+    do: Enum.filter(children(state), &(&1.spec.shutdown_group == shutdown_group))
 
   @spec record_restart(t) :: {:ok, t} | :error
   def record_restart(state) do
@@ -150,7 +143,7 @@ defmodule Parent.State do
     child = child!(state, child_ref)
     children = child_with_deps(state, child)
     state = Enum.reduce(children, state, &remove_child(&2, &1))
-    {Enum.sort_by(children, & &1.startup_index), state}
+    {children, state}
   end
 
   defp child_with_deps(state, child),
@@ -169,7 +162,7 @@ defmodule Parent.State do
 
   defp bound_children(state, child) do
     Stream.filter(
-      Map.values(state.children),
+      children(state),
       &Enum.any?(
         &1.spec.binds_to,
         fn child_ref -> child_ref == child.spec.id or child_ref == child.pid end

@@ -489,8 +489,12 @@ defmodule Parent do
 
   @doc "Returns the list of running child processes in the startup order."
   @spec children :: [child]
-  def children(),
-    do: Enum.map(State.children(state()), &%{id: &1.spec.id, pid: &1.pid, meta: &1.meta})
+  def children() do
+    state()
+    |> State.children()
+    |> Enum.sort_by(& &1.startup_index)
+    |> Enum.map(&%{id: &1.spec.id, pid: &1.pid, meta: &1.meta})
+  end
 
   @doc """
   Returns true if the child process is still running, false otherwise.
