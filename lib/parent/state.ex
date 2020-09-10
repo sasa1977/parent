@@ -150,25 +150,47 @@ defmodule Parent.State do
   end
 
   defp child_with_deps(state, child),
-    do: Map.values(child_with_deps(state, child, %{child.pid => child}))
+    do: Map.values(child_with_deps(state, child, %{}))
 
   defp child_with_deps(state, child, collected) do
+    # collect all siblings in the same shutdown group
+    group_children =
+      state
+      |> children_in_shutdown_group(child.spec.shutdown_group)
+      |> Stream.concat([child])
+      |> Enum.uniq_by(& &1.pid)
+
+    collected = Enum.into(Stream.map(group_children, &{&1.pid, &1}), collected)
+
     state
-    |> bound_children(child)
-    |> Stream.concat(children_in_shutdown_group(state, child.spec.shutdown_group))
+    # collect all deps from all siblings of this group
+    |> bound_siblings(group_children)
+
+    # reject already processed deps
+    |> Stream.reject(&Map.has_key?(collected, &1.pid))
+
+    # recursively add dep
     |> Enum.reduce(collected, fn dep, collected ->
+      # a dep may have been added indirectly by another dep, so double check again
       if Map.has_key?(collected, dep.pid),
         do: collected,
         else: child_with_deps(state, dep, Map.put(collected, dep.pid, dep))
     end)
   end
 
-  defp bound_children(state, child) do
-    Stream.filter(
-      children(state),
+  defp bound_siblings(state, children) do
+    refs =
+      children
+      |> Stream.flat_map(&[&1.spec.id, &1.pid])
+      |> Stream.reject(&is_nil/1)
+      |> MapSet.new()
+
+    state
+    |> children()
+    |> Stream.filter(
       &Enum.any?(
         &1.spec.binds_to,
-        fn child_ref -> child_ref == child.spec.id or child_ref == child.pid end
+        fn child_ref -> MapSet.member?(refs, child_ref) end
       )
     )
   end
