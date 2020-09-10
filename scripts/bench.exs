@@ -15,7 +15,6 @@ end)
 |> Kernel.div(1000)
 |> IO.inspect()
 
-IO.inspect(Process.info(parent, :reductions))
 IO.inspect(Process.info(parent, :memory))
 
 {:ok, sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
@@ -35,5 +34,4 @@ end)
 |> Kernel.div(1000)
 |> IO.inspect()
 
-IO.inspect(Process.info(sup, :reductions))
 IO.inspect(Process.info(sup, :memory))

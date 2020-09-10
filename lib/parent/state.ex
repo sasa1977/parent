@@ -9,7 +9,8 @@ defmodule Parent.State do
             children: %{pid => child()},
             startup_index: non_neg_integer,
             restart_counter: RestartCounter.t(),
-            registry?: boolean
+            registry?: boolean,
+            deps: %{pid => [pid]}
           }
 
   @type child :: %{
@@ -31,7 +32,8 @@ defmodule Parent.State do
       children: %{},
       startup_index: 0,
       restart_counter: RestartCounter.new(opts[:max_restarts], opts[:max_seconds]),
-      registry?: Keyword.fetch!(opts, :registry?)
+      registry?: Keyword.fetch!(opts, :registry?),
+      deps: %{}
     }
   end
 
@@ -62,6 +64,7 @@ defmodule Parent.State do
     state
     |> Map.update!(:children, &Map.put(&1, pid, child))
     |> Map.update!(:startup_index, &(&1 + 1))
+    |> update_bindings(pid, spec)
   end
 
   @spec register_child(t, pid, child, reference | nil) :: t
@@ -75,7 +78,9 @@ defmodule Parent.State do
         do: state,
         else: Map.update!(state, :id_to_pid, &Map.put(&1, child.spec.id, pid))
 
-    Map.update!(state, :children, &Map.put(&1, child.pid, child))
+    state
+    |> Map.update!(:children, &Map.put(&1, child.pid, child))
+    |> update_bindings(pid, child.spec)
   end
 
   @spec children(t) :: [child()]
@@ -138,6 +143,17 @@ defmodule Parent.State do
          do: {:ok, child.meta, state}
   end
 
+  defp update_bindings(state, pid, child_spec) do
+    Enum.reduce(
+      child_spec.binds_to,
+      state,
+      fn child_ref, state ->
+        bound = child!(state, child_ref)
+        %{state | deps: Map.update(state.deps, bound.pid, [pid], &[pid | &1])}
+      end
+    )
+  end
+
   defp update(state, child_ref, updater) do
     with {:ok, child} <- child(state, child_ref),
          updated_child = updater.(child),
@@ -158,10 +174,9 @@ defmodule Parent.State do
   defp child_with_deps(state, child, collected) do
     # collect all siblings in the same shutdown group
     group_children =
-      state
-      |> children_in_shutdown_group(child.spec.shutdown_group)
-      |> Stream.concat([child])
-      |> Enum.uniq_by(& &1.pid)
+      if is_nil(child.spec.shutdown_group),
+        do: [child],
+        else: children_in_shutdown_group(state, child.spec.shutdown_group)
 
     collected = Enum.into(Stream.map(group_children, &{&1.pid, &1}), collected)
 
@@ -182,25 +197,15 @@ defmodule Parent.State do
   end
 
   defp bound_siblings(state, children) do
-    refs =
-      children
-      |> Stream.flat_map(&[&1.spec.id, &1.pid])
-      |> Stream.reject(&is_nil/1)
-      |> MapSet.new()
-
-    state
-    |> children()
-    |> Stream.filter(
-      &Enum.any?(
-        &1.spec.binds_to,
-        fn child_ref -> MapSet.member?(refs, child_ref) end
-      )
-    )
+    children
+    |> Stream.flat_map(&Map.get(state.deps, &1.pid, []))
+    |> Enum.map(&child!(state, &1))
   end
 
   defp remove_child(state, child) do
     state
     |> Map.update!(:id_to_pid, &Map.delete(&1, child.spec.id))
     |> Map.update!(:children, &Map.delete(&1, child.pid))
+    |> Map.update!(:deps, &Map.delete(&1, child.pid))
   end
 end
