@@ -69,12 +69,25 @@ Parent.Supervisor.start_link(
 
 ```elixir
 # stops child1 and all children depending on it
-stopped_children = Parent.Client.stop_child(some_parent, :child1)
+stopped_children = Parent.Client.shutdown_child(some_parent, :child1)
 
 # ...
 
 # returns all stopped children back to the parent
 Parent.Client.return_children(some_parent, stopped_children)
+```
+
+### Dynamic supervisor with anonymous children
+
+```elixir
+Parent.Supervisor.start_link([])
+
+{:ok, pid1} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil))
+{:ok, pid2} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil))
+# ...
+
+Parent.Client.shutdown_child(MySup, pid1)
+Parent.Client.restart_child(MySup, pid2)
 ```
 
 ### Dynamic supervisor with child discovery
@@ -83,8 +96,8 @@ Parent.Client.return_children(some_parent, stopped_children)
 Parent.Supervisor.start_link([], name: MySup)
 
 # meta is an optional value associated with the child
-Parent.Supervisor.start_child(MySup, Parent.child_spec(Child, id: id1, meta: some_meta))
-Parent.Supervisor.start_child(MySup, Parent.child_spec(Child, id: id2, meta: another_meta))
+Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id1, meta: some_meta))
+Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id2, meta: another_meta))
 # ...
 
 # synchronous calls into the parent process
@@ -208,6 +221,8 @@ end
 ## Status
 
 This library has seen production usage in a couple of different projects. However, features such as automatic restarts and ETS registry are pretty fresh (aded in late 2020) and so they haven't seen any serious production testing yet.
+
+Based on a very quick & shallow test, Parent is about 5x slower and consumes about 3x more memory than DynamicSupervisor.
 
 The API is prone to significant changes.
 
