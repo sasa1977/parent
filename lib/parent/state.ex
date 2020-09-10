@@ -44,7 +44,6 @@ defmodule Parent.State do
   @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
   def register_child(state, pid, spec, timer_ref) do
     false = Map.has_key?(state.children, pid)
-    false = Map.has_key?(state.id_to_pid, spec.id)
 
     child = %{
       spec: spec,
@@ -55,16 +54,19 @@ defmodule Parent.State do
       meta: spec.meta
     }
 
+    state =
+      if is_nil(spec.id),
+        do: state,
+        else: Map.update!(state, :id_to_pid, &Map.put(&1, spec.id, pid))
+
     state
-    |> put_in([:id_to_pid, spec.id], pid)
-    |> put_in([:children, pid], child)
+    |> Map.update!(:children, &Map.put(&1, pid, child))
     |> Map.update!(:startup_index, &(&1 + 1))
   end
 
   @spec register_child(t, pid, child, reference | nil) :: t
   def reregister_child(state, child, pid, timer_ref) do
     false = Map.has_key?(state.children, pid)
-    false = Map.has_key?(state.id_to_pid, child.spec.id)
 
     child = %{child | pid: pid, timer_ref: timer_ref, meta: child.spec.meta}
 
@@ -100,6 +102,7 @@ defmodule Parent.State do
   def num_children(state), do: Enum.count(state.children)
 
   @spec child(t, Parent.child_ref()) :: {:ok, child} | :error
+  def child(_state, nil), do: :error
   def child(state, pid) when is_pid(pid), do: Map.fetch(state.children, pid)
   def child(state, id), do: with({:ok, pid} <- child_pid(state, id), do: child(state, pid))
 
@@ -114,7 +117,7 @@ defmodule Parent.State do
 
   @spec child_id(t, pid) :: {:ok, Parent.child_id()} | :error
   def child_id(state, pid) do
-    with {:ok, child} <- Map.fetch(state.children, pid), do: {:ok, child.spec.id}
+    with {:ok, child} <- child(state, pid), do: {:ok, child.spec.id}
   end
 
   @spec child_pid(t, Parent.child_id()) :: {:ok, pid} | :error

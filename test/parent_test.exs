@@ -298,6 +298,20 @@ defmodule ParentTest do
       assert pids == [child5, child4, child3, child2, child1]
     end
 
+    test "stops pid-references dependencies" do
+      Parent.initialize()
+
+      child1 = start_child!(shutdown_group: :group1)
+      child2 = start_child!(binds_to: [child1], shutdown_group: :group2)
+      child3 = start_child!(binds_to: [child2])
+      child4 = start_child!(shutdown_group: :group1)
+      child5 = start_child!(shutdown_group: :group2)
+      child6 = start_child!()
+
+      assert Map.keys(Parent.shutdown_child(child4)) == [child1, child2, child3, child4, child5]
+      assert [%{pid: ^child6}] = Parent.children()
+    end
+
     test "fails if the parent is not initialized" do
       assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.shutdown_child(1) end
     end
@@ -869,6 +883,27 @@ defmodule ParentTest do
       Task.await(task)
     end
 
+    test "which_children correctly handles anonymous children" do
+      Parent.initialize()
+      parent = self()
+      child1 = start_child!()
+      child2 = start_child!(id: :child)
+      child3 = start_child!()
+
+      task =
+        Task.async(fn ->
+          assert :supervisor.which_children(parent) == [
+                   {:undefined, child1, :worker, [Agent]},
+                   {:child, child2, :worker, [Agent]},
+                   {:undefined, child3, :worker, [Agent]}
+                 ]
+        end)
+
+      assert handle_parent_message() == :ignore
+
+      Task.await(task)
+    end
+
     test "ignores unknown messages" do
       Parent.initialize()
       assert is_nil(Parent.handle_message({:EXIT, self(), :normal}))
@@ -979,6 +1014,24 @@ defmodule ParentTest do
       assert log =~ "[error] Too many restarts in parent process"
       assert Parent.children() == []
     end
+
+    test "correctly returns pid-references dependencies" do
+      Parent.initialize()
+
+      child1 = start_child!(shutdown_group: :group1)
+      child2 = start_child!(binds_to: [child1])
+      start_child!(binds_to: [child2])
+      start_child!(shutdown_group: :group1)
+      start_child!(binds_to: [child1])
+      child6 = start_child!()
+
+      stopped_children = Parent.shutdown_child(child1)
+      Parent.return_children(stopped_children)
+      assert Parent.num_children() == 6
+
+      Parent.shutdown_child(hd(Parent.children()).pid)
+      assert [%{pid: ^child6}] = Parent.children()
+    end
   end
 
   defp handle_parent_message,
@@ -1008,7 +1061,7 @@ defmodule ParentTest do
   end
 
   defp start_child(overrides \\ []) do
-    id = Keyword.get(overrides, :id, make_ref())
+    id = Keyword.get(overrides, :id, nil)
     succeed_on_child_start(id)
 
     Parent.child_spec(
@@ -1016,7 +1069,7 @@ defmodule ParentTest do
         id: id,
         start:
           {Agent, :start_link,
-           [fn -> if :ets.lookup(__MODULE__, id) == [{id, true}], do: raise("error") end]}
+           [fn -> if id && :ets.lookup(__MODULE__, id) == [{id, true}], do: raise("error") end]}
       },
       overrides
     )

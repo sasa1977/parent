@@ -49,19 +49,37 @@ defmodule Parent.Restart do
     )
   end
 
-  defp return_children(state, []), do: {[], state, nil}
+  defp return_children(state, children, new_pids \\ %{})
 
-  defp return_children(state, [child | children]) do
+  defp return_children(state, [], _new_pids), do: {[], state, nil}
+
+  defp return_children(state, [child | children], new_pids) do
+    child = update_bindings(child, new_pids)
+
     case return_child(state, child) do
-      {:ok, state} -> return_children(state, children)
-      {:error, start_error} -> {[child | children], state, start_error}
+      {:ok, new_pid, state} ->
+        new_pids = Map.put(new_pids, child.pid, new_pid)
+        return_children(state, children, new_pids)
+
+      {:error, start_error} ->
+        # map remaining bindings
+        children = Enum.map(children, &update_bindings(&1, new_pids))
+        {[child | children], state, start_error}
     end
+  end
+
+  defp update_bindings(child, new_pids) do
+    # if a child binds to a sibling via pid we need to update the bindings to reflect new pids
+    update_in(
+      child.spec.binds_to,
+      fn binds_to -> Enum.map(binds_to, &Map.get(new_pids, &1, &1)) end
+    )
   end
 
   defp return_child(state, child) do
     case Parent.start_child_process(state, child.spec) do
       {:ok, new_pid, timer_ref} ->
-        {:ok, State.reregister_child(state, child, new_pid, timer_ref)}
+        {:ok, new_pid, State.reregister_child(state, child, new_pid, timer_ref)}
 
       :ignore ->
         {:ok, state}

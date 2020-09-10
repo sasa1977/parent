@@ -44,8 +44,8 @@ defmodule Parent do
   specifications](https://hexdocs.pm/elixir/Supervisor.html#module-child-specification). All the
   fields that are shared with `Supervisor` have the same effect.
 
-  It's worth noting that the `:id` field is optional. If not provided, the parent will auto-assign
-  a unique id when the child is started. Therefore, the minimum required child specification
+  It's worth noting that the `:id` field is optional. If not provided, the child will be anonymous,
+  and you can only manage it via its pid. Therefore, the minimum required child specification
   is `%{start: mfa_or_zero_arity_fun}`.
 
   Also, just like with `Supervisor`, you can provide `module | {module, arg}` when starting a
@@ -267,7 +267,7 @@ defmodule Parent do
           optional(:restart) => :temporary | :transient | :with_dep | :permanent,
           optional(:max_restarts) => non_neg_integer | :infinity,
           optional(:max_seconds) => pos_integer,
-          optional(:binds_to) => [child_id],
+          optional(:binds_to) => [child_ref],
           optional(:shutdown_group) => shutdown_group
         }
 
@@ -441,7 +441,7 @@ defmodule Parent do
       {:ok, children, state} ->
         stop_children(children, :shutdown)
         store(state)
-        children |> Stream.map(&{&1.spec.id, &1}) |> Map.new()
+        stopped_children(children)
     end
   end
 
@@ -521,7 +521,7 @@ defmodule Parent do
   def supervisor_which_children() do
     state()
     |> State.children()
-    |> Enum.map(&{&1.spec.id, &1.pid, &1.spec.type, &1.spec.modules})
+    |> Enum.map(&{&1.spec.id || :undefined, &1.pid, &1.spec.type, &1.spec.modules})
   end
 
   @doc """
@@ -604,7 +604,7 @@ defmodule Parent do
 
   defp default_spec do
     %{
-      id: make_ref(),
+      id: nil,
       meta: nil,
       timeout: :infinity,
       restart: :permanent,
@@ -780,7 +780,7 @@ defmodule Parent do
 
   @doc false
   def stopped_children(children),
-    do: children |> Stream.map(&{&1.spec.id, &1}) |> Map.new()
+    do: children |> Stream.map(&{with(nil <- &1.spec.id, do: &1.pid), &1}) |> Map.new()
 
   @doc false
   def give_up!(state, exit, error) do

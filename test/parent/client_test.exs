@@ -105,12 +105,19 @@ defmodule Parent.ClientTest do
       test "returns the meta of the given child when registry is #{registry?}" do
         parent =
           start_parent!(
-            [child_spec(id: :child1, meta: :meta1), child_spec(id: :child2, meta: :meta2)],
+            [
+              child_spec(id: :child1, meta: :meta1),
+              child_spec(meta: :meta2)
+            ],
             registry?: unquote(registry?)
           )
 
+        child1 = child_pid!(parent, :child1)
+        child2 = (parent |> Client.children() |> Enum.reject(&(&1.pid == child1)) |> hd).pid
+
         assert Client.child_meta(parent, :child1) == {:ok, :meta1}
-        assert Client.child_meta(parent, :child2) == {:ok, :meta2}
+        assert Client.child_meta(parent, child1) == {:ok, :meta1}
+        assert Client.child_meta(parent, child2) == {:ok, :meta2}
       end
 
       test "returns error when child is unknown when registry is #{registry?}" do

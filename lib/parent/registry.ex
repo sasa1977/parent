@@ -22,26 +22,26 @@ defmodule Parent.Registry do
   @spec register(pid, Parent.child_spec()) :: :ok
   def register(child_pid, child_spec) do
     table = MetaRegistry.table!(self())
-    key = {:id, child_spec.id}
-    :ets.insert(table, [{child_pid, key}, {key, child_pid, child_spec.meta}])
+    key = {:id, with(nil <- child_spec.id, do: child_pid)}
+    main_entry = {key, child_pid, child_spec.meta}
+    entries = if is_nil(child_spec.id), do: [main_entry], else: [{child_pid, key}, main_entry]
+    :ets.insert(table, entries)
     :ok
   end
 
   @spec unregister(pid) :: :ok
   def unregister(child_pid) do
     table = MetaRegistry.table!(self())
-
-    with [[key]] <- :ets.match(table, {child_pid, :"$1"}),
-         do: :ets.delete(table, key)
-
+    :ets.delete(table, key(table, child_pid))
     :ets.delete(table, child_pid)
     :ok
   end
 
-  @spec update_meta(Parent.child_id(), Parent.child_meta()) :: :ok
-  def update_meta(child_id, meta) do
+  @spec update_meta(Parent.child_ref(), Parent.child_meta()) :: :ok
+  def update_meta(child_ref, meta) do
     table = MetaRegistry.table!(self())
-    true = :ets.update_element(table, {:id, child_id}, {3, meta})
+    key = key(table, child_ref)
+    true = :ets.update_element(table, key, {3, meta})
     :ok
   end
 
@@ -60,11 +60,22 @@ defmodule Parent.Registry do
     end
   end
 
-  @spec child_meta(table, Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
-  def child_meta(table, child_id) do
-    case :ets.match(table, {{:id, child_id}, :_, :"$1"}) do
+  @spec child_meta(table, Parent.child_ref()) :: {:ok, Parent.child_meta()} | :error
+  def child_meta(table, child_ref) do
+    case :ets.match(table, {key(table, child_ref), :_, :"$1"}) do
       [[meta]] -> {:ok, meta}
       [] -> :error
+    end
+  end
+
+  defp key(table, child_ref) do
+    if is_pid(child_ref) do
+      case :ets.match(table, {child_ref, :"$1"}) do
+        [[key]] -> key
+        [] -> {:id, child_ref}
+      end
+    else
+      {:id, child_ref}
     end
   end
 end
