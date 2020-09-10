@@ -9,7 +9,6 @@ defmodule Parent.State do
             children: %{pid => child()},
             startup_index: non_neg_integer,
             restart_counter: RestartCounter.t(),
-            shutdown_groups: %{Parent.shutdown_group() => MapSet.t(Parent.child_id())},
             registry?: boolean
           }
 
@@ -18,8 +17,6 @@ defmodule Parent.State do
           pid: pid,
           timer_ref: reference() | nil,
           startup_index: non_neg_integer(),
-          dependencies: MapSet.t(Parent.child_id()),
-          bound_siblings: MapSet.t(Parent.child_id()),
           restart_counter: RestartCounter.t(),
           meta: Parent.child_meta()
         }
@@ -34,7 +31,6 @@ defmodule Parent.State do
       children: %{},
       startup_index: 0,
       restart_counter: RestartCounter.new(opts[:max_restarts], opts[:max_seconds]),
-      shutdown_groups: %{},
       registry?: Keyword.fetch!(opts, :registry?)
     }
   end
@@ -50,15 +46,11 @@ defmodule Parent.State do
     false = Map.has_key?(state.children, pid)
     false = Map.has_key?(state.id_to_pid, spec.id)
 
-    {dependencies, state} = update_dependencies(state, spec)
-
     child = %{
       spec: spec,
       pid: pid,
       timer_ref: timer_ref,
       startup_index: state.startup_index,
-      dependencies: dependencies,
-      bound_siblings: MapSet.new(),
       restart_counter: RestartCounter.new(spec.max_restarts, spec.max_seconds),
       meta: spec.meta
     }
@@ -66,7 +58,6 @@ defmodule Parent.State do
     state
     |> put_in([:id_to_pid, spec.id], pid)
     |> put_in([:children, pid], child)
-    |> add_to_shutdown_group(spec)
     |> Map.update!(:startup_index, &(&1 + 1))
   end
 
@@ -75,21 +66,11 @@ defmodule Parent.State do
     false = Map.has_key?(state.children, pid)
     false = Map.has_key?(state.id_to_pid, child.spec.id)
 
-    {dependencies, state} = update_dependencies(state, child.spec)
-
-    child = %{
-      child
-      | pid: pid,
-        timer_ref: timer_ref,
-        dependencies: dependencies,
-        bound_siblings: MapSet.new(),
-        meta: child.spec.meta
-    }
+    child = %{child | pid: pid, timer_ref: timer_ref, meta: child.spec.meta}
 
     state
     |> put_in([:id_to_pid, child.spec.id], child.pid)
     |> put_in([:children, child.pid], child)
-    |> add_to_shutdown_group(child.spec)
   end
 
   @spec children(t) :: [child()]
@@ -100,10 +81,12 @@ defmodule Parent.State do
   end
 
   @spec children_in_shutdown_group(t, Parent.shutdown_group()) :: [child]
+  def children_in_shutdown_group(_state, nil), do: []
+
   def children_in_shutdown_group(state, shutdown_group) do
-    state.shutdown_groups
-    |> Map.get(shutdown_group, [])
-    |> Enum.map(&child!(state, &1))
+    state.children
+    |> Map.values()
+    |> Enum.filter(&(&1.spec.shutdown_group == shutdown_group))
   end
 
   @spec record_restart(t) :: {:ok, t} | :error
@@ -163,94 +146,40 @@ defmodule Parent.State do
          do: {:ok, updated_child, %{state | children: updated_children}}
   end
 
-  defp update!(state, child_ref, updater) do
-    {:ok, _child, state} = update(state, child_ref, updater)
-    state
-  end
-
-  defp update_dependencies(state, spec) do
-    dependencies =
-      Enum.reduce(
-        spec.binds_to,
-        MapSet.new(spec.binds_to),
-        &MapSet.union(&2, child!(state, &1).dependencies)
-      )
-
-    state =
-      Enum.reduce(
-        dependencies,
-        state,
-        fn dep_id, state ->
-          update!(state, dep_id, fn dep ->
-            update_in(dep.bound_siblings, &MapSet.put(&1, spec.id))
-          end)
-        end
-      )
-
-    {dependencies, state}
-  end
-
   defp pop_child_and_bound_children(state, child_ref) do
     child = child!(state, child_ref)
-    children = Map.values(all_bound_children(state, child, %{child.spec.id => child}))
-    state = Enum.reduce(children, state, &remove_child(&2, &1.spec.id))
+    children = child_with_deps(state, child)
+    state = Enum.reduce(children, state, &remove_child(&2, &1))
     {Enum.sort_by(children, & &1.startup_index), state}
   end
 
-  defp all_bound_children(state, child, deps) do
-    state.shutdown_groups
-    |> Map.get(child.spec.shutdown_group, [])
-    |> Stream.concat(child.bound_siblings)
-    |> Stream.uniq()
-    |> Stream.map(&child!(state, &1))
-    |> Enum.reduce(deps, fn dep, deps ->
-      if Map.has_key?(deps, dep.spec.id),
-        do: deps,
-        else: all_bound_children(state, dep, Map.put(deps, dep.spec.id, dep))
+  defp child_with_deps(state, child),
+    do: Map.values(child_with_deps(state, child, %{child.pid => child}))
+
+  defp child_with_deps(state, child, collected) do
+    state
+    |> bound_children(child)
+    |> Stream.concat(children_in_shutdown_group(state, child.spec.shutdown_group))
+    |> Enum.reduce(collected, fn dep, collected ->
+      if Map.has_key?(collected, dep.pid),
+        do: collected,
+        else: child_with_deps(state, dep, Map.put(collected, dep.pid, dep))
     end)
   end
 
-  defp remove_child(state, child_id) do
-    child = child!(state, child_id)
-
-    state =
-      state
-      |> Map.update!(:id_to_pid, &Map.delete(&1, child.spec.id))
-      |> Map.update!(:children, &Map.delete(&1, child.pid))
-      |> remove_from_shutdown_group(child.spec)
-
-    state =
-      Enum.reduce(
-        child.dependencies,
-        state,
-        fn dep_id, state ->
-          update!(state, dep_id, fn dep ->
-            update_in(dep.bound_siblings, &MapSet.delete(&1, child.spec.id))
-          end)
-        end
+  defp bound_children(state, child) do
+    Stream.filter(
+      Map.values(state.children),
+      &Enum.any?(
+        &1.spec.binds_to,
+        fn child_ref -> child_ref == child.spec.id or child_ref == child.pid end
       )
-
-    Enum.reduce(
-      child.bound_siblings,
-      state,
-      fn bound_sibling_id, state ->
-        update!(state, bound_sibling_id, fn bound_sibling ->
-          update_in(bound_sibling.dependencies, &MapSet.delete(&1, child.spec.id))
-        end)
-      end
     )
   end
 
-  defp add_to_shutdown_group(state, %{shutdown_group: nil}), do: state
-
-  defp add_to_shutdown_group(state, spec) do
+  defp remove_child(state, child) do
     state
-    |> Map.update!(:shutdown_groups, &Map.put_new(&1, spec.shutdown_group, MapSet.new()))
-    |> update_in([:shutdown_groups, spec.shutdown_group], &MapSet.put(&1, spec.id))
+    |> Map.update!(:id_to_pid, &Map.delete(&1, child.spec.id))
+    |> Map.update!(:children, &Map.delete(&1, child.pid))
   end
-
-  defp remove_from_shutdown_group(state, %{shutdown_group: nil}), do: state
-
-  defp remove_from_shutdown_group(state, spec),
-    do: update_in(state.shutdown_groups[spec.shutdown_group], &MapSet.delete(&1, spec.id))
 end
