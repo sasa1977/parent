@@ -307,7 +307,7 @@ defmodule Parent do
           | {:forbidden_bindings, from: child_id | nil, to: [child_ref]}
           | {:non_uniform_shutdown_group, [shutdown_group]}
 
-  @spec child_spec(child_spec, Keyword.t() | child_spec) :: child_spec
+  @spec child_spec(start_spec, Keyword.t() | child_spec) :: child_spec
   def child_spec(spec, overrides \\ []) do
     spec
     |> expand_child_spec()
