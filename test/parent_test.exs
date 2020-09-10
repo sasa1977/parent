@@ -207,6 +207,17 @@ defmodule ParentTest do
 
       refute Process.alive?(child)
       refute_receive {:EXIT, ^child, _reason}
+      assert Parent.children() == []
+    end
+
+    test "stops the child referenced by the pid" do
+      Parent.initialize()
+      child = start_child!(id: :child)
+
+      Parent.shutdown_child(child)
+
+      refute Process.alive?(child)
+      assert Parent.children() == []
     end
 
     test "forcefully terminates the child if shutdown is `:brutal_kill`" do
@@ -297,6 +308,15 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child)
       assert Parent.restart_child(:child) == %{}
+      assert [%{id: :child}] = Parent.children()
+      refute child_pid!(:child) == child
+    end
+
+    test "restarts the process referenced by the pid" do
+      Parent.initialize()
+      child = start_child!(id: :child)
+      assert Parent.restart_child(child) == %{}
+      assert [%{id: :child}] = Parent.children()
       refute child_pid!(:child) == child
     end
 
@@ -638,15 +658,21 @@ defmodule ParentTest do
       refute Parent.child?(:child1)
       refute Parent.child?(:child2)
 
-      start_child!(id: :child1)
-      start_child!(id: :child2)
+      child1 = start_child!(id: :child1)
+      child2 = start_child!(id: :child2)
 
       assert Parent.child?(:child1)
+      assert Parent.child?(child1)
+
       assert Parent.child?(:child2)
+      assert Parent.child?(child2)
 
       Parent.shutdown_child(:child1)
       refute Parent.child?(:child1)
+      refute Parent.child?(child1)
+
       assert Parent.child?(:child2)
+      assert Parent.child?(child2)
     end
 
     test "fails if the parent is not initialized" do
@@ -700,11 +726,15 @@ defmodule ParentTest do
     test "returns the meta of the given child, error otherwise" do
       Parent.initialize()
 
-      start_child!(id: :child1, meta: :meta1)
-      start_child!(id: :child2, meta: :meta2)
+      child1 = start_child!(id: :child1, meta: :meta1)
+      child2 = start_child!(id: :child2, meta: :meta2)
 
       assert Parent.child_meta(:child1) == {:ok, :meta1}
+      assert Parent.child_meta(child1) == {:ok, :meta1}
+
       assert Parent.child_meta(:child2) == {:ok, :meta2}
+      assert Parent.child_meta(child2) == {:ok, :meta2}
+
       assert Parent.child_meta(:unknown_child) == :error
 
       Parent.shutdown_child(:child1)
@@ -722,12 +752,13 @@ defmodule ParentTest do
       Parent.initialize()
 
       start_child!(id: :child1, meta: 1)
-      start_child!(id: :child2, meta: 2)
+      child2 = start_child!(id: :child2, meta: 2)
 
       Parent.update_child_meta(:child2, &(&1 + 1))
+      Parent.update_child_meta(child2, &(&1 + 1))
 
       assert Parent.child_meta(:child1) == {:ok, 1}
-      assert Parent.child_meta(:child2) == {:ok, 3}
+      assert Parent.child_meta(:child2) == {:ok, 4}
 
       Parent.shutdown_child(:child1)
       assert Parent.update_child_meta(:child1, & &1) == :error

@@ -24,8 +24,6 @@ defmodule Parent.State do
           meta: Parent.child_meta()
         }
 
-  @type filter :: [{:id, Parent.child_id()}] | [{:pid, pid}]
-
   @spec initialize(Parent.opts()) :: t
   def initialize(opts) do
     opts = Keyword.merge([max_restarts: 3, max_seconds: 5, registry?: false], opts)
@@ -105,7 +103,7 @@ defmodule Parent.State do
   def children_in_shutdown_group(state, shutdown_group) do
     state.shutdown_groups
     |> Map.get(shutdown_group, [])
-    |> Enum.map(&child!(state, id: &1))
+    |> Enum.map(&child!(state, &1))
   end
 
   @spec record_restart(t) :: {:ok, t} | :error
@@ -114,10 +112,10 @@ defmodule Parent.State do
          do: {:ok, %{state | restart_counter: counter}}
   end
 
-  @spec pop_child_with_bound_siblings(t, filter) :: {:ok, [child], t} | :error
-  def pop_child_with_bound_siblings(state, filter) do
-    with {:ok, child} <- child(state, filter) do
-      {children, state} = pop_child_and_bound_children(state, pid: child.pid)
+  @spec pop_child_with_bound_siblings(t, Parent.child_ref()) :: {:ok, [child], t} | :error
+  def pop_child_with_bound_siblings(state, child_ref) do
+    with {:ok, child} <- child(state, child_ref) do
+      {children, state} = pop_child_and_bound_children(state, child.pid)
       {:ok, children, state}
     end
   end
@@ -125,18 +123,16 @@ defmodule Parent.State do
   @spec num_children(t) :: non_neg_integer
   def num_children(state), do: Enum.count(state.children)
 
-  @spec child(t, filter) :: {:ok, child} | :error
-  def child(state, id: id),
-    do: with({:ok, pid} <- child_pid(state, id), do: child(state, pid: pid))
+  @spec child(t, Parent.child_ref()) :: {:ok, child} | :error
+  def child(state, pid) when is_pid(pid), do: Map.fetch(state.children, pid)
+  def child(state, id), do: with({:ok, pid} <- child_pid(state, id), do: child(state, pid))
 
-  def child(state, pid: pid), do: Map.fetch(state.children, pid)
+  @spec child?(t, Parent.child_ref()) :: boolean()
+  def child?(state, child_ref), do: match?({:ok, _child}, child(state, child_ref))
 
-  @spec child?(t, filter) :: boolean()
-  def child?(state, filter), do: match?({:ok, _child}, child(state, filter))
-
-  @spec child!(t, filter) :: child
-  def child!(state, filter) do
-    {:ok, child} = child(state, filter)
+  @spec child!(t, Parent.child_ref()) :: child
+  def child!(state, child_ref) do
+    {:ok, child} = child(state, child_ref)
     child
   end
 
@@ -148,29 +144,27 @@ defmodule Parent.State do
   @spec child_pid(t, Parent.child_id()) :: {:ok, pid} | :error
   def child_pid(state, id), do: Map.fetch(state.id_to_pid, id)
 
-  @spec child_meta(t, Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
-  def child_meta(state, id) do
-    with {:ok, pid} <- child_pid(state, id),
-         {:ok, child} <- Map.fetch(state.children, pid),
-         do: {:ok, child.meta}
+  @spec child_meta(t, Parent.child_ref()) :: {:ok, Parent.child_meta()} | :error
+  def child_meta(state, child_ref) do
+    with {:ok, child} <- child(state, child_ref), do: {:ok, child.meta}
   end
 
-  @spec update_child_meta(t, Parent.child_id(), (Parent.child_meta() -> Parent.child_meta())) ::
+  @spec update_child_meta(t, Parent.child_ref(), (Parent.child_meta() -> Parent.child_meta())) ::
           {:ok, Parent.child_meta(), t} | :error
-  def update_child_meta(state, id, updater) do
-    with {:ok, child, state} <- update(state, [id: id], &update_in(&1.meta, updater)),
+  def update_child_meta(state, child_ref, updater) do
+    with {:ok, child, state} <- update(state, child_ref, &update_in(&1.meta, updater)),
          do: {:ok, child.meta, state}
   end
 
-  defp update(state, filter, updater) do
-    with {:ok, child} <- child(state, filter),
+  defp update(state, child_ref, updater) do
+    with {:ok, child} <- child(state, child_ref),
          updated_child = updater.(child),
          updated_children = Map.put(state.children, child.pid, updated_child),
          do: {:ok, updated_child, %{state | children: updated_children}}
   end
 
-  defp update!(state, filter, updater) do
-    {:ok, _child, state} = update(state, filter, updater)
+  defp update!(state, child_ref, updater) do
+    {:ok, _child, state} = update(state, child_ref, updater)
     state
   end
 
@@ -179,7 +173,7 @@ defmodule Parent.State do
       Enum.reduce(
         spec.binds_to,
         MapSet.new(spec.binds_to),
-        &MapSet.union(&2, child!(state, id: &1).dependencies)
+        &MapSet.union(&2, child!(state, &1).dependencies)
       )
 
     state =
@@ -187,7 +181,7 @@ defmodule Parent.State do
         dependencies,
         state,
         fn dep_id, state ->
-          update!(state, [id: dep_id], fn dep ->
+          update!(state, dep_id, fn dep ->
             update_in(dep.bound_siblings, &MapSet.put(&1, spec.id))
           end)
         end
@@ -196,8 +190,8 @@ defmodule Parent.State do
     {dependencies, state}
   end
 
-  defp pop_child_and_bound_children(state, filter) do
-    child = child!(state, filter)
+  defp pop_child_and_bound_children(state, child_ref) do
+    child = child!(state, child_ref)
     children = Map.values(all_bound_children(state, child, %{child.spec.id => child}))
     state = Enum.reduce(children, state, &remove_child(&2, &1.spec.id))
     {Enum.sort_by(children, & &1.startup_index), state}
@@ -208,7 +202,7 @@ defmodule Parent.State do
     |> Map.get(child.spec.shutdown_group, [])
     |> Stream.concat(child.bound_siblings)
     |> Stream.uniq()
-    |> Stream.map(&child!(state, id: &1))
+    |> Stream.map(&child!(state, &1))
     |> Enum.reduce(deps, fn dep, deps ->
       if Map.has_key?(deps, dep.spec.id),
         do: deps,
@@ -217,7 +211,7 @@ defmodule Parent.State do
   end
 
   defp remove_child(state, child_id) do
-    child = child!(state, id: child_id)
+    child = child!(state, child_id)
 
     state =
       state
@@ -230,7 +224,7 @@ defmodule Parent.State do
         child.dependencies,
         state,
         fn dep_id, state ->
-          update!(state, [id: dep_id], fn dep ->
+          update!(state, dep_id, fn dep ->
             update_in(dep.bound_siblings, &MapSet.delete(&1, child.spec.id))
           end)
         end
@@ -240,7 +234,7 @@ defmodule Parent.State do
       child.bound_siblings,
       state,
       fn bound_sibling_id, state ->
-        update!(state, [id: bound_sibling_id], fn bound_sibling ->
+        update!(state, bound_sibling_id, fn bound_sibling ->
           update_in(bound_sibling.dependencies, &MapSet.delete(&1, child.spec.id))
         end)
       end

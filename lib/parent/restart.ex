@@ -6,7 +6,7 @@ defmodule Parent.Restart do
     to_start =
       children
       # reject already started children (idempotence)
-      |> Stream.reject(&State.child?(state, id: &1.spec.id))
+      |> Stream.reject(&State.child?(state, &1.spec.id))
       |> Enum.sort_by(& &1.startup_index)
 
     {to_start, state} = record_restart(state, to_start)
@@ -92,9 +92,7 @@ defmodule Parent.Restart do
               {stopped, state}
 
             child ->
-              {:ok, children, state} =
-                State.pop_child_with_bound_siblings(state, id: child.spec.id)
-
+              {:ok, children, state} = State.pop_child_with_bound_siblings(state, child.pid)
               {[children | stopped], state}
           end
         end

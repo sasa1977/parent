@@ -275,6 +275,8 @@ defmodule Parent do
   @type child_meta :: term
   @type shutdown_group :: term
 
+  @type child_ref :: child_id | pid
+
   @type start :: (() -> Supervisor.on_start_child()) | {module, atom, [term]}
 
   @type shutdown :: non_neg_integer | :infinity | :brutal_kill
@@ -385,16 +387,16 @@ defmodule Parent do
 
   See "Restart flow" for details on restarting procedure.
   """
-  @spec restart_child(child_id, restart_opts) :: stopped_children
-  def restart_child(child_id, opts \\ []) do
-    case State.pop_child_with_bound_siblings(state(), id: child_id) do
+  @spec restart_child(child_ref, restart_opts) :: stopped_children
+  def restart_child(child_ref, opts \\ []) do
+    case State.pop_child_with_bound_siblings(state(), child_ref) do
       :error ->
         raise "trying to terminate an unknown child"
 
       {:ok, children, state} ->
         opts = Keyword.merge([include_temporary?: true], opts)
         stop_children(children, :shutdown)
-        children = Stream.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_id))
+        children = Stream.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_ref))
         {stopped_children, state} = Restart.perform(state, children, opts)
         store(state)
         stopped_children
@@ -430,9 +432,9 @@ defmodule Parent do
   Permanent and transient children won't be restarted, and their specifications won't be preserved.
   In other words, this function completely removes the child and all other children bound to it.
   """
-  @spec shutdown_child(child_id) :: stopped_children
-  def shutdown_child(child_id) do
-    case State.pop_child_with_bound_siblings(state(), id: child_id) do
+  @spec shutdown_child(child_ref) :: stopped_children
+  def shutdown_child(child_ref) do
+    case State.pop_child_with_bound_siblings(state(), child_ref) do
       :error ->
         raise "trying to terminate an unknown child"
 
@@ -497,8 +499,8 @@ defmodule Parent do
   This can happen if the corresponding `:EXIT` message still hasn't been
   processed.
   """
-  @spec child?(child_id) :: boolean
-  def child?(id), do: match?({:ok, _}, child_pid(id))
+  @spec child?(child_ref) :: boolean
+  def child?(child_ref), do: match?({:ok, _}, State.child(state(), child_ref))
 
   @doc """
   Should be invoked by the behaviour when handling `:which_children` GenServer call.
@@ -551,13 +553,9 @@ defmodule Parent do
 
   See `:supervisor.get_childspec/2` for details.
   """
-  @spec supervisor_get_childspec(child_id | pid) :: {:ok, child_spec} | {:error, :not_found}
-  def supervisor_get_childspec(child_id_or_pid) do
-    search_res =
-      with :error <- State.child(state(), id: child_id_or_pid),
-           do: State.child(state(), pid: child_id_or_pid)
-
-    case search_res do
+  @spec supervisor_get_childspec(child_ref) :: {:ok, child_spec} | {:error, :not_found}
+  def supervisor_get_childspec(child_ref) do
+    case State.child(state(), child_ref) do
       {:ok, child} -> {:ok, child.spec}
       :error -> {:error, :not_found}
     end
@@ -569,21 +567,21 @@ defmodule Parent do
 
   @doc "Returns the id of a child process with the given pid."
   @spec child_id(pid) :: {:ok, child_id} | :error
-  def child_id(pid), do: State.child_id(state(), pid)
+  def child_id(child_pid), do: State.child_id(state(), child_pid)
 
   @doc "Returns the pid of a child process with the given id."
   @spec child_pid(child_id) :: {:ok, pid} | :error
-  def child_pid(id), do: State.child_pid(state(), id)
+  def child_pid(child_id), do: State.child_pid(state(), child_id)
 
   @doc "Returns the meta associated with the given child id."
-  @spec child_meta(child_id) :: {:ok, child_meta} | :error
-  def child_meta(id), do: State.child_meta(state(), id)
+  @spec child_meta(child_ref) :: {:ok, child_meta} | :error
+  def child_meta(child_ref), do: State.child_meta(state(), child_ref)
 
   @doc "Updates the meta of the given child process."
-  @spec update_child_meta(child_id, (child_meta -> child_meta)) :: :ok | :error
-  def update_child_meta(child_id, updater) do
-    with {:ok, meta, new_state} <- State.update_child_meta(state(), child_id, updater) do
-      if State.registry?(new_state), do: Registry.update_meta(child_id, meta)
+  @spec update_child_meta(child_ref, (child_meta -> child_meta)) :: :ok | :error
+  def update_child_meta(child_ref, updater) do
+    with {:ok, meta, new_state} <- State.update_child_meta(state(), child_ref, updater) do
+      if State.registry?(new_state), do: Registry.update_meta(child_ref, meta)
       store(new_state)
     end
   end
@@ -651,7 +649,7 @@ defmodule Parent do
   end
 
   defp check_missing_deps(state, child_spec) do
-    case Enum.reject(child_spec.binds_to, &State.child?(state, id: &1)) do
+    case Enum.reject(child_spec.binds_to, &State.child?(state, &1)) do
       [] -> :ok
       missing_deps -> {:error, {:missing_deps, missing_deps}}
     end
@@ -659,7 +657,7 @@ defmodule Parent do
 
   defp check_valid_bindings!(state, %{restart: from} = child_spec) do
     child_spec.binds_to
-    |> Stream.map(&State.child!(state, id: &1))
+    |> Stream.map(&State.child!(state, &1))
     |> Enum.reject(fn %{spec: %{restart: to}} ->
       # Valid bindings:
       #
@@ -712,7 +710,7 @@ defmodule Parent do
   defp invoke_start_function(fun) when is_function(fun, 0), do: fun.()
 
   defp do_handle_message(state, {:EXIT, pid, reason}) do
-    case State.child(state, pid: pid) do
+    case State.child(state, pid) do
       {:ok, child} ->
         kill_timer(child.timer_ref, pid)
         handle_child_down(state, child, reason)
@@ -723,7 +721,7 @@ defmodule Parent do
   end
 
   defp do_handle_message(state, {__MODULE__, :child_timeout, pid}) do
-    child = State.child!(state, pid: pid)
+    child = State.child!(state, pid)
     stop_child(child, :kill)
     handle_child_down(state, child, :timeout)
   end
@@ -741,8 +739,8 @@ defmodule Parent do
     {:ignore, state}
   end
 
-  defp do_handle_message(state, {:"$gen_call", client, {:get_childspec, child_id_or_pid}}) do
-    GenServer.reply(client, supervisor_get_childspec(child_id_or_pid))
+  defp do_handle_message(state, {:"$gen_call", client, {:get_childspec, child_ref}}) do
+    GenServer.reply(client, supervisor_get_childspec(child_ref))
     {:ignore, state}
   end
 
@@ -750,7 +748,7 @@ defmodule Parent do
 
   defp handle_child_down(state, child, reason) do
     if State.registry?(state), do: Registry.unregister(child.pid)
-    {:ok, children, state} = State.pop_child_with_bound_siblings(state, pid: child.pid)
+    {:ok, children, state} = State.pop_child_with_bound_siblings(state, child.pid)
     child = Map.merge(child, %{record_restart?: true, exit_reason: reason})
 
     bound_siblings =

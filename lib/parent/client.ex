@@ -41,25 +41,25 @@ defmodule Parent.Client do
     end
   end
 
-  @spec child_meta(GenServer.server(), Parent.child_id()) :: {:ok, Parent.child_meta()} | :error
-  def child_meta(parent, child_id) do
+  @spec child_meta(GenServer.server(), Parent.child_ref()) :: {:ok, Parent.child_meta()} | :error
+  def child_meta(parent, child_ref) do
     case Registry.table(parent) do
-      {:ok, table} -> Registry.child_meta(table, child_id)
-      :error -> call(parent, {:child_meta, child_id})
+      {:ok, table} -> Registry.child_meta(table, child_ref)
+      :error -> call(parent, {:child_meta, child_ref})
     end
   end
 
   @spec start_child(GenServer.server(), Parent.start_spec()) :: Supervisor.on_start_child()
   def start_child(parent, child_spec), do: call(parent, {:start_child, child_spec}, :infinity)
 
-  @spec shutdown_child(GenServer.server(), Parent.child_id()) ::
+  @spec shutdown_child(GenServer.server(), Parent.child_ref()) ::
           {:ok, Parent.stopped_children()} | {:error, :unknown_child}
-  def shutdown_child(parent, child_id), do: call(parent, {:shutdown_child, child_id}, :infinity)
+  def shutdown_child(parent, child_ref), do: call(parent, {:shutdown_child, child_ref}, :infinity)
 
-  @spec restart_child(GenServer.server(), Parent.child_id(), Parent.restart_opts()) ::
+  @spec restart_child(GenServer.server(), Parent.child_ref(), Parent.restart_opts()) ::
           {:ok, Parent.stopped_children()} | {:error, :unknown_child}
-  def restart_child(parent, child_id, opts \\ []),
-    do: call(parent, {:restart_child, child_id, opts}, :infinity)
+  def restart_child(parent, child_ref, opts \\ []),
+    do: call(parent, {:restart_child, child_ref, opts}, :infinity)
 
   @spec shutdown_all(GenServer.server()) :: Parent.stopped_children()
   def shutdown_all(server), do: call(server, :shutdown_all, :infinity)
@@ -75,33 +75,33 @@ defmodule Parent.Client do
           Parent.child_id(),
           (Parent.child_meta() -> Parent.child_meta())
         ) :: :ok | :error
-  def update_child_meta(parent, child_id, updater),
-    do: call(parent, {:update_child_meta, child_id, updater}, :infinity)
+  def update_child_meta(parent, child_ref, updater),
+    do: call(parent, {:update_child_meta, child_ref, updater}, :infinity)
 
   @doc false
   def handle_request(:children), do: Parent.children()
   def handle_request({:child_pid, child_id}), do: Parent.child_pid(child_id)
-  def handle_request({:child_meta, child_id}), do: Parent.child_meta(child_id)
+  def handle_request({:child_meta, child_ref}), do: Parent.child_meta(child_ref)
   def handle_request({:start_child, child_spec}), do: Parent.start_child(child_spec)
   def handle_request(:shutdown_all), do: Parent.shutdown_all()
 
-  def handle_request({:shutdown_child, child_id}) do
-    if Parent.child?(child_id),
-      do: {:ok, Parent.shutdown_child(child_id)},
+  def handle_request({:shutdown_child, child_ref}) do
+    if Parent.child?(child_ref),
+      do: {:ok, Parent.shutdown_child(child_ref)},
       else: {:error, :unknown_child}
   end
 
-  def handle_request({:restart_child, child_id, opts}) do
-    if Parent.child?(child_id),
-      do: Parent.restart_child(child_id, opts),
+  def handle_request({:restart_child, child_ref, opts}) do
+    if Parent.child?(child_ref),
+      do: Parent.restart_child(child_ref, opts),
       else: {:error, :unknown_child}
   end
 
   def handle_request({:return_children, stopped_children, opts}),
     do: Parent.return_children(stopped_children, opts)
 
-  def handle_request({:update_child_meta, child_id, updater}),
-    do: Parent.update_child_meta(child_id, updater)
+  def handle_request({:update_child_meta, child_ref, updater}),
+    do: Parent.update_child_meta(child_ref, updater)
 
   defp call(server, request, timeout \\ 5000)
        when (is_integer(timeout) and timeout >= 0) or timeout == :infinity do
