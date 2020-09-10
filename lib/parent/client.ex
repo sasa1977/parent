@@ -49,15 +49,15 @@ defmodule Parent.Client do
     end
   end
 
-  @spec start_child(GenServer.server(), Parent.start_spec()) :: Supervisor.on_start_child()
+  @spec start_child(GenServer.server(), Parent.start_spec()) :: Parent.on_start_child()
   def start_child(parent, child_spec), do: call(parent, {:start_child, child_spec}, :infinity)
 
   @spec shutdown_child(GenServer.server(), Parent.child_ref()) ::
-          {:ok, Parent.stopped_children()} | {:error, :unknown_child}
+          {:ok, Parent.stopped_children()} | :error
   def shutdown_child(parent, child_ref), do: call(parent, {:shutdown_child, child_ref}, :infinity)
 
   @spec restart_child(GenServer.server(), Parent.child_ref(), Parent.restart_opts()) ::
-          {:ok, Parent.stopped_children()} | {:error, :unknown_child}
+          {:ok, Parent.stopped_children()} | :error
   def restart_child(parent, child_ref, opts \\ []),
     do: call(parent, {:restart_child, child_ref, opts}, :infinity)
 
@@ -85,17 +85,11 @@ defmodule Parent.Client do
   def handle_request({:start_child, child_spec}), do: Parent.start_child(child_spec)
   def handle_request(:shutdown_all), do: Parent.shutdown_all()
 
-  def handle_request({:shutdown_child, child_ref}) do
-    if Parent.child?(child_ref),
-      do: {:ok, Parent.shutdown_child(child_ref)},
-      else: {:error, :unknown_child}
-  end
+  def handle_request({:shutdown_child, child_ref}),
+    do: Parent.shutdown_child(child_ref)
 
-  def handle_request({:restart_child, child_ref, opts}) do
-    if Parent.child?(child_ref),
-      do: Parent.restart_child(child_ref, opts),
-      else: {:error, :unknown_child}
-  end
+  def handle_request({:restart_child, child_ref, opts}),
+    do: Parent.restart_child(child_ref, opts)
 
   def handle_request({:return_children, stopped_children, opts}),
     do: Parent.return_children(stopped_children, opts)

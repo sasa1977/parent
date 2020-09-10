@@ -70,9 +70,12 @@ defmodule Parent.State do
 
     child = %{child | pid: pid, timer_ref: timer_ref, meta: child.spec.meta}
 
-    state
-    |> put_in([:id_to_pid, child.spec.id], child.pid)
-    |> put_in([:children, child.pid], child)
+    state =
+      if is_nil(child.spec.id),
+        do: state,
+        else: Map.update!(state, :id_to_pid, &Map.put(&1, child.spec.id, pid))
+
+    Map.update!(state, :children, &Map.put(&1, child.pid, child))
   end
 
   @spec children(t) :: [child()]

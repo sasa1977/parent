@@ -102,10 +102,15 @@ defmodule ParentTest do
       assert start_child(start: fn -> {:error, :some_reason} end) == {:error, :some_reason}
     end
 
-    test "fails if the id is already taken" do
+    test "fails if id is already taken" do
       Parent.initialize()
       child = start_child!(id: :child)
       assert start_child(id: :child) == {:error, {:already_started, child}}
+    end
+
+    test "fails if id is pid" do
+      Parent.initialize()
+      assert start_child(id: self()) == {:error, :invalid_child_id}
     end
 
     test "fails if deps are not started" do
@@ -123,15 +128,12 @@ defmodule ParentTest do
           with_dep: ~w/temporary/a
         ],
         to <- tos do
-      test "exits on forbidden dependency from #{from} to #{to}" do
+      test "fails on forbidden dependency from #{from} to #{to}" do
         Parent.initialize()
         start_child!(id: :child1, restart: unquote(to))
 
-        assert capture_log(fn ->
-                 assert catch_exit(
-                          start_child(id: :child2, restart: unquote(from), binds_to: [:child1])
-                        ) == :invalid_binding
-               end) =~ "Forbidden binding from #{unquote(from)} child :child2 to :child1"
+        assert {:error, {:forbidden_bindings, [from: :child2, to: [:child1]]}} =
+                 start_child(id: :child2, restart: unquote(from), binds_to: [:child1])
       end
     end
 
@@ -141,12 +143,11 @@ defmodule ParentTest do
       for r1 <- ~w/temporary transient with_dep temporary/a,
           r2 <- ~w/temporary transient with_dep temporary/a,
           r1 != r2 do
+        Parent.shutdown_all()
         start_child!(id: :child1, restart: r1, shutdown_group: :group)
 
-        assert capture_log(fn ->
-                 assert catch_exit(start_child(id: :child2, restart: r2, shutdown_group: :group)) ==
-                          :invalid_shutdown_group
-               end) =~ "Shutdown group :group  has children with different restart types"
+        assert start_child(id: :child2, restart: r2, shutdown_group: :group) ==
+                 {:error, {:non_uniform_shutdown_group, :group}}
       end
     end
 
@@ -203,7 +204,8 @@ defmodule ParentTest do
       Parent.initialize()
       child = start_child!(id: :child)
 
-      assert Map.keys(Parent.shutdown_child(:child)) == [:child]
+      assert {:ok, stopped_children} = Parent.shutdown_child(:child)
+      assert Map.keys(stopped_children) == [:child]
 
       refute Process.alive?(child)
       refute_receive {:EXIT, ^child, _reason}
@@ -268,10 +270,7 @@ defmodule ParentTest do
 
     test "fails if an unknown child is given" do
       Parent.initialize()
-
-      assert_raise RuntimeError, "trying to terminate an unknown child", fn ->
-        Parent.shutdown_child(:child)
-      end
+      assert Parent.shutdown_child(:child) == :error
     end
 
     test "stops all dependencies in the opposite startup order" do
@@ -286,7 +285,8 @@ defmodule ParentTest do
 
       Enum.each([child1, child2, child3, child4, child5], &Process.monitor/1)
 
-      assert Map.keys(Parent.shutdown_child(:child4)) == ~w/child1 child2 child3 child4 child5/a
+      assert {:ok, stopped_children} = Parent.shutdown_child(:child4)
+      assert Map.keys(stopped_children) == ~w/child1 child2 child3 child4 child5/a
       assert [%{id: :child6}] = Parent.children()
 
       pids =
@@ -308,7 +308,8 @@ defmodule ParentTest do
       child5 = start_child!(shutdown_group: :group2)
       child6 = start_child!()
 
-      assert Map.keys(Parent.shutdown_child(child4)) == [child1, child2, child3, child4, child5]
+      assert {:ok, stopped_children} = Parent.shutdown_child(child4)
+      assert Map.keys(stopped_children) == [child1, child2, child3, child4, child5]
       assert [%{pid: ^child6}] = Parent.children()
     end
 
@@ -321,7 +322,7 @@ defmodule ParentTest do
     test "restarts the process and returns the new pid" do
       Parent.initialize()
       child = start_child!(id: :child)
-      assert Parent.restart_child(:child) == %{}
+      assert Parent.restart_child(:child) == {:ok, %{}}
       assert [%{id: :child}] = Parent.children()
       refute child_pid!(:child) == child
     end
@@ -329,7 +330,7 @@ defmodule ParentTest do
     test "restarts the process referenced by the pid" do
       Parent.initialize()
       child = start_child!(id: :child)
-      assert Parent.restart_child(child) == %{}
+      assert Parent.restart_child(child) == {:ok, %{}}
       assert [%{id: :child}] = Parent.children()
       refute child_pid!(:child) == child
     end
@@ -355,7 +356,7 @@ defmodule ParentTest do
       child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
       child6 = start_child!(id: :child6)
 
-      assert Parent.restart_child(:child4) == %{}
+      assert Parent.restart_child(:child4) == {:ok, %{}}
 
       refute child_pid!(:child1) == child1
       refute child_pid!(:child2) == child2
@@ -371,7 +372,7 @@ defmodule ParentTest do
       start_child!(id: :child1, restart: :temporary)
       start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
 
-      assert %{child2: _} = Parent.restart_child(:child1, include_temporary?: false)
+      assert {:ok, %{child2: _}} = Parent.restart_child(:child1, include_temporary?: false)
       assert [%{id: :child1}] = Parent.children()
     end
 
@@ -923,7 +924,7 @@ defmodule ParentTest do
       start_child!(id: :child1)
       child2 = start_child!(id: :child2)
       start_child!(id: :child3, binds_to: [:child1])
-      stopped_children = Parent.shutdown_child(:child1)
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
 
       assert Parent.return_children(stopped_children) == %{}
 
@@ -955,7 +956,7 @@ defmodule ParentTest do
       start_child!(id: :child5, binds_to: [:child3])
       start_child!(id: :child6, binds_to: [:child5], shutdown_group: :group1)
 
-      stopped_children = Parent.shutdown_child(:child1)
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
       raise_on_child_start(:child5)
 
       assert Parent.return_children(stopped_children) == %{}
@@ -976,7 +977,7 @@ defmodule ParentTest do
       start_child!(id: :child2, binds_to: [:child1], restart: :temporary)
       start_child!(id: :child3, binds_to: [:child1], restart: :temporary)
 
-      stopped_children = Parent.shutdown_child(:child1)
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
       raise_on_child_start(:child2)
 
       stopped_children = Parent.return_children(stopped_children)
@@ -988,7 +989,7 @@ defmodule ParentTest do
       Parent.initialize()
       start_child!(id: :child1)
       start_child!(id: :child2, binds_to: [:child1])
-      stopped_children = Parent.shutdown_child(:child1)
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
       assert Parent.return_children(stopped_children) == %{}
       assert Parent.return_children(stopped_children) == %{}
       assert [%{id: :child1}, %{id: :child2}] = Parent.children()
@@ -1025,7 +1026,7 @@ defmodule ParentTest do
       start_child!(binds_to: [child1])
       child6 = start_child!()
 
-      stopped_children = Parent.shutdown_child(child1)
+      {:ok, stopped_children} = Parent.shutdown_child(child1)
       Parent.return_children(stopped_children)
       assert Parent.num_children() == 6
 

@@ -300,6 +300,13 @@ defmodule Parent do
 
   @type restart_opts :: [include_temporary?: boolean]
 
+  @type on_start_child :: Supervisor.on_start_child() | {:error, start_error}
+  @type start_error ::
+          :invalid_child_id
+          | {:missing_deps, [child_ref]}
+          | {:forbidden_bindings, from: child_id | nil, to: [child_ref]}
+          | {:non_uniform_shutdown_group, [shutdown_group]}
+
   @spec child_spec(child_spec, Keyword.t() | child_spec) :: child_spec
   def child_spec(spec, overrides \\ []) do
     spec
@@ -331,24 +338,22 @@ defmodule Parent do
   def initialized?(), do: not is_nil(Process.get(__MODULE__))
 
   @doc "Starts the child described by the specification."
-  @spec start_child(start_spec) :: Supervisor.on_start_child()
+  @spec start_child(start_spec) :: on_start_child()
   def start_child(child_spec) do
     state = state()
     child_spec = expand_child_spec(child_spec)
 
-    with :ok <- validate_id(state, child_spec.id) do
-      case start_child_process(state, child_spec) do
-        {:ok, pid, timer_ref} ->
-          state = State.register_child(state, pid, child_spec, timer_ref)
-          store(state)
-          {:ok, pid}
+    case start_child_process(state, child_spec) do
+      {:ok, pid, timer_ref} ->
+        state = State.register_child(state, pid, child_spec, timer_ref)
+        store(state)
+        {:ok, pid}
 
-        :ignore ->
-          {:ok, :undefined}
+      :ignore ->
+        {:ok, :undefined}
 
-        error ->
-          error
-      end
+      error ->
+        error
     end
   end
 
@@ -387,19 +392,15 @@ defmodule Parent do
 
   See "Restart flow" for details on restarting procedure.
   """
-  @spec restart_child(child_ref, restart_opts) :: stopped_children
+  @spec restart_child(child_ref, restart_opts) :: {:ok, stopped_children} | :error
   def restart_child(child_ref, opts \\ []) do
-    case State.pop_child_with_bound_siblings(state(), child_ref) do
-      :error ->
-        raise "trying to terminate an unknown child"
-
-      {:ok, children, state} ->
-        opts = Keyword.merge([include_temporary?: true], opts)
-        stop_children(children, :shutdown)
-        children = Stream.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_ref))
-        {stopped_children, state} = Restart.perform(state, children, opts)
-        store(state)
-        stopped_children
+    with {:ok, children, state} <- State.pop_child_with_bound_siblings(state(), child_ref) do
+      opts = Keyword.merge([include_temporary?: true], opts)
+      stop_children(children, :shutdown)
+      children = Stream.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_ref))
+      {stopped_children, state} = Restart.perform(state, children, opts)
+      store(state)
+      {:ok, stopped_children}
     end
   end
 
@@ -432,16 +433,12 @@ defmodule Parent do
   Permanent and transient children won't be restarted, and their specifications won't be preserved.
   In other words, this function completely removes the child and all other children bound to it.
   """
-  @spec shutdown_child(child_ref) :: stopped_children
+  @spec shutdown_child(child_ref) :: {:ok, stopped_children} | :error
   def shutdown_child(child_ref) do
-    case State.pop_child_with_bound_siblings(state(), child_ref) do
-      :error ->
-        raise "trying to terminate an unknown child"
-
-      {:ok, children, state} ->
-        stop_children(children, :shutdown)
-        store(state)
-        stopped_children(children)
+    with {:ok, children, state} <- State.pop_child_with_bound_siblings(state(), child_ref) do
+      stop_children(children, :shutdown)
+      store(state)
+      {:ok, stopped_children(children)}
     end
   end
 
@@ -623,16 +620,9 @@ defmodule Parent do
   defp default_modules(fun) when is_function(fun),
     do: [fun |> :erlang.fun_info() |> Keyword.fetch!(:module)]
 
-  defp validate_id(state, id) do
-    case State.child_pid(state, id) do
-      {:ok, pid} -> {:error, {:already_started, pid}}
-      :error -> :ok
-    end
-  end
-
   @doc false
   def start_child_process(state, child_spec) do
-    with :ok <- check_bindings(state, child_spec),
+    with :ok <- validate_spec(state, child_spec),
          {:ok, pid} <- invoke_start_function(child_spec.start) do
       timer_ref =
         case child_spec.timeout do
@@ -646,10 +636,22 @@ defmodule Parent do
     end
   end
 
-  defp check_bindings(state, child_spec) do
-    with :ok <- check_missing_deps(state, child_spec),
-         :ok <- check_valid_bindings!(state, child_spec),
+  defp validate_spec(state, child_spec) do
+    with :ok <- check_id_type(child_spec.id),
+         :ok <- check_id_uniqueness(state, child_spec.id),
+         :ok <- check_missing_deps(state, child_spec),
+         :ok <- check_valid_bindings(state, child_spec),
          do: check_valid_shutdown_group(state, child_spec)
+  end
+
+  defp check_id_type(pid) when is_pid(pid), do: {:error, :invalid_child_id}
+  defp check_id_type(_other), do: :ok
+
+  defp check_id_uniqueness(state, id) do
+    case State.child_pid(state, id) do
+      {:ok, pid} -> {:error, {:already_started, pid}}
+      :error -> :ok
+    end
   end
 
   defp check_missing_deps(state, child_spec) do
@@ -659,10 +661,10 @@ defmodule Parent do
     end
   end
 
-  defp check_valid_bindings!(state, %{restart: from} = child_spec) do
+  defp check_valid_bindings(state, %{restart: from} = child_spec) do
     child_spec.binds_to
     |> Stream.map(&State.child!(state, &1))
-    |> Enum.reject(fn %{spec: %{restart: to}} ->
+    |> Stream.reject(fn %{spec: %{restart: to}} ->
       # Valid bindings:
       #
       # 1. A child can bind to a dep with the same restart strategy
@@ -675,16 +677,10 @@ defmodule Parent do
         (from == :with_dep and to in ~w/transient permanent/a) or
         from == :temporary
     end)
+    |> Enum.map(&with nil <- &1.spec.id, do: &1.spec.pid)
     |> case do
-      [] ->
-        :ok
-
-      deps ->
-        msg =
-          "Forbidden binding from #{child_spec.restart} child #{inspect(child_spec.id)} to " <>
-            (deps |> Stream.map(&inspect(&1.spec.id)) |> Enum.join(", "))
-
-        give_up!(state, :invalid_binding, msg)
+      [] -> :ok
+      deps -> {:error, {:forbidden_bindings, from: child_spec.id, to: deps}}
     end
   end
 
@@ -696,18 +692,9 @@ defmodule Parent do
     |> Stream.map(& &1.restart)
     |> Enum.uniq()
     |> case do
-      [_] ->
-        :ok
-
-      [_ | _] ->
-        msg =
-          "Shutdown group #{inspect(child_spec.shutdown_group)} " <>
-            " has children with different restart types"
-
-        give_up!(state, :invalid_shutdown_group, msg)
+      [_] -> :ok
+      [_ | _] -> {:error, {:non_uniform_shutdown_group, child_spec.shutdown_group}}
     end
-
-    :ok
   end
 
   defp invoke_start_function({mod, fun, args}), do: apply(mod, fun, args)

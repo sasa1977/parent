@@ -194,7 +194,7 @@ defmodule Parent.ClientTest do
 
     test "returns error when child is unknown" do
       parent = start_parent!()
-      assert Client.shutdown_child(parent, :child) == {:error, :unknown_child}
+      assert Client.shutdown_child(parent, :child) == :error
     end
   end
 
@@ -202,14 +202,14 @@ defmodule Parent.ClientTest do
     test "stops the given child" do
       parent = start_parent!([child_spec(id: :child)])
       pid1 = child_pid!(parent, :child)
-      assert Client.restart_child(parent, :child) == %{}
+      assert Client.restart_child(parent, :child) == {:ok, %{}}
       assert child_ids(parent) == [:child]
       refute child_pid!(parent, :child) == pid1
     end
 
     test "returns error when child is unknown" do
       pid = start_parent!()
-      assert Client.restart_child(pid, :child) == {:error, :unknown_child}
+      assert Client.restart_child(pid, :child) == :error
     end
   end
 
