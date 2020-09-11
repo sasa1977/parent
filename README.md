@@ -222,7 +222,7 @@ end
 
 This library has seen production usage in a couple of different projects. However, features such as automatic restarts and ETS registry are pretty fresh (aded in late 2020) and so they haven't seen any serious production testing yet.
 
-Based on a very quick & shallow test, Parent is about 5x slower and consumes about 3x more memory than DynamicSupervisor.
+Based on a very quick & shallow test, Parent is about 3x slower and consumes about 2x more memory than DynamicSupervisor.
 
 The API is prone to significant changes.
 

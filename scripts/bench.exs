@@ -4,10 +4,13 @@
   Enum.each(
     1..100_000,
     fn _i ->
-      Parent.Client.start_child(
-        parent,
-        %{start: {Agent, :start_link, [fn -> :ok end]}, restart: :temporary}
-      )
+      {:ok, pid} =
+        Parent.Client.start_child(
+          parent,
+          %{start: {Agent, :start_link, [fn -> :ok end]}, restart: :temporary}
+        )
+
+      Parent.Client.restart_child(parent, pid)
     end
   )
 end)
@@ -23,10 +26,10 @@ IO.inspect(Process.info(parent, :memory))
   Enum.each(
     1..100_000,
     fn i ->
-      DynamicSupervisor.start_child(
-        sup,
-        %{id: i, start: {Agent, :start_link, [fn -> :ok end]}, restart: :temporary}
-      )
+      spec = %{id: i, start: {Agent, :start_link, [fn -> :ok end]}, restart: :temporary}
+      {:ok, pid} = DynamicSupervisor.start_child(sup, spec)
+      DynamicSupervisor.terminate_child(sup, pid)
+      DynamicSupervisor.start_child(sup, spec)
     end
   )
 end)

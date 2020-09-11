@@ -397,7 +397,7 @@ defmodule Parent do
     with {:ok, children, state} <- State.pop_child_with_bound_siblings(state(), child_ref) do
       opts = Keyword.merge([include_temporary?: true], opts)
       stop_children(children, :shutdown)
-      children = Stream.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_ref))
+      children = Enum.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_ref))
       {stopped_children, state} = Restart.perform(state, children, opts)
       store(state)
       {:ok, stopped_children}
@@ -663,8 +663,8 @@ defmodule Parent do
 
   defp check_valid_bindings(state, %{restart: from} = child_spec) do
     child_spec.binds_to
-    |> Stream.map(&State.child!(state, &1))
-    |> Stream.reject(fn %{spec: %{restart: to}} ->
+    |> Enum.map(&State.child!(state, &1))
+    |> Enum.reject(fn %{spec: %{restart: to}} ->
       # Valid bindings:
       #
       # 1. A child can bind to a dep with the same restart strategy
@@ -683,6 +683,8 @@ defmodule Parent do
       deps -> {:error, {:forbidden_bindings, from: child_spec.id, to: deps}}
     end
   end
+
+  defp check_valid_shutdown_group(_state, %{shutdown_group: nil}), do: :ok
 
   defp check_valid_shutdown_group(state, child_spec) do
     state
@@ -767,7 +769,7 @@ defmodule Parent do
 
   @doc false
   def stopped_children(children),
-    do: children |> Stream.map(&{with(nil <- &1.spec.id, do: &1.pid), &1}) |> Map.new()
+    do: Enum.into(children, %{}, &{with(nil <- &1.spec.id, do: &1.pid), &1})
 
   @doc false
   def give_up!(state, exit, error) do

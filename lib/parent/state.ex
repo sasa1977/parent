@@ -10,7 +10,8 @@ defmodule Parent.State do
             startup_index: non_neg_integer,
             restart_counter: RestartCounter.t(),
             registry?: boolean,
-            deps: %{pid => [pid]}
+            deps: %{pid => [pid]},
+            shutdown_groups: %{Parent.shutdown_group() => [pid]}
           }
 
   @type child :: %{
@@ -33,7 +34,8 @@ defmodule Parent.State do
       startup_index: 0,
       restart_counter: RestartCounter.new(opts[:max_restarts], opts[:max_seconds]),
       registry?: Keyword.fetch!(opts, :registry?),
-      deps: %{}
+      deps: %{},
+      shutdown_groups: %{}
     }
   end
 
@@ -65,6 +67,7 @@ defmodule Parent.State do
     |> Map.update!(:children, &Map.put(&1, pid, child))
     |> Map.update!(:startup_index, &(&1 + 1))
     |> update_bindings(pid, spec)
+    |> update_shutdown_groups(pid, spec)
   end
 
   @spec register_child(t, pid, child, reference | nil) :: t
@@ -81,16 +84,15 @@ defmodule Parent.State do
     state
     |> Map.update!(:children, &Map.put(&1, child.pid, child))
     |> update_bindings(pid, child.spec)
+    |> update_shutdown_groups(pid, child.spec)
   end
 
   @spec children(t) :: [child()]
   def children(state), do: Map.values(state.children)
 
   @spec children_in_shutdown_group(t, Parent.shutdown_group()) :: [child]
-  def children_in_shutdown_group(_state, nil), do: []
-
   def children_in_shutdown_group(state, shutdown_group),
-    do: Enum.filter(children(state), &(&1.spec.shutdown_group == shutdown_group))
+    do: Map.get(state.shutdown_groups, shutdown_group, []) |> Enum.map(&child!(state, &1))
 
   @spec record_restart(t) :: {:ok, t} | :error
   def record_restart(state) do
@@ -154,6 +156,16 @@ defmodule Parent.State do
     )
   end
 
+  defp update_shutdown_groups(state, _pid, %{shutdown_group: nil}), do: state
+
+  defp update_shutdown_groups(state, pid, spec) do
+    Map.update!(
+      state,
+      :shutdown_groups,
+      &Map.update(&1, spec.shutdown_group, [pid], fn pids -> [pid | pids] end)
+    )
+  end
+
   defp update(state, child_ref, updater) do
     with {:ok, child} <- child(state, child_ref),
          updated_child = updater.(child),
@@ -178,34 +190,41 @@ defmodule Parent.State do
         do: [child],
         else: children_in_shutdown_group(state, child.spec.shutdown_group)
 
-    collected = Enum.into(Stream.map(group_children, &{&1.pid, &1}), collected)
+    collected = Enum.reduce(group_children, collected, &Map.put_new(&2, &1.pid, &1))
 
-    state
-    # collect all deps from all siblings of this group
-    |> bound_siblings(group_children)
+    for child <- group_children,
+        dep <- Map.get(state.deps, child.pid, []),
+        bound_sibling = child!(state, dep),
+        sibling_pid = bound_sibling.pid,
+        not Map.has_key?(collected, bound_sibling.pid),
+        reduce: collected do
+      %{^sibling_pid => _} = collected ->
+        collected
 
-    # reject already processed deps
-    |> Stream.reject(&Map.has_key?(collected, &1.pid))
-
-    # recursively add dep
-    |> Enum.reduce(collected, fn dep, collected ->
-      # a dep may have been added indirectly by another dep, so double check again
-      if Map.has_key?(collected, dep.pid),
-        do: collected,
-        else: child_with_deps(state, dep, Map.put(collected, dep.pid, dep))
-    end)
-  end
-
-  defp bound_siblings(state, children) do
-    children
-    |> Stream.flat_map(&Map.get(state.deps, &1.pid, []))
-    |> Enum.map(&child!(state, &1))
+      collected ->
+        child_with_deps(
+          state,
+          bound_sibling,
+          Map.put(collected, bound_sibling.pid, bound_sibling)
+        )
+    end
   end
 
   defp remove_child(state, child) do
+    group = child.spec.shutdown_group
+
     state
     |> Map.update!(:id_to_pid, &Map.delete(&1, child.spec.id))
     |> Map.update!(:children, &Map.delete(&1, child.pid))
     |> Map.update!(:deps, &Map.delete(&1, child.pid))
+    |> Map.update!(:shutdown_groups, fn
+      groups ->
+        with %{^group => children} <- groups do
+          case children -- [child.pid] do
+            [] -> Map.delete(groups, group)
+            children -> %{groups | group => children}
+          end
+        end
+    end)
   end
 end

@@ -90,10 +90,11 @@ defmodule Parent.Restart do
   end
 
   defp shutdown_groups(children) do
-    children
-    |> Stream.map(& &1.spec.shutdown_group)
-    |> Stream.reject(&is_nil/1)
-    |> MapSet.new()
+    for child <- children,
+        shutdown_group = child.spec.shutdown_group,
+        not is_nil(shutdown_group),
+        into: MapSet.new(),
+        do: shutdown_group
   end
 
   defp stop_children_in_shutdown_groups(state, shutdown_groups) do
@@ -134,9 +135,8 @@ defmodule Parent.Restart do
     [failed_child | other_children] = not_started
 
     {ignored, children_to_restart} =
-      other_children
-      |> Stream.concat(extra_stopped_children)
-      |> Stream.concat(ignored)
+      [other_children, extra_stopped_children, ignored]
+      |> Stream.concat()
       |> Stream.map(&Map.put(&1, :exit_reason, :shutdown))
       |> Stream.concat([
         Map.merge(failed_child, %{exit_reason: start_error, record_restart?: true})
