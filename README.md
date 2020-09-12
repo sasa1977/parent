@@ -30,35 +30,45 @@ Parent.Supervisor.start_link(
 )
 ```
 
-### Per-child max restart frequency
+### Binding lifecycles
 
 ```elixir
 Parent.Supervisor.start_link(
   [
-    Parent.child_spec(Child1, max_restarts: 10, max_seconds: 10),
-    Parent.child_spec(Child2, max_restarts: 3, max_seconds: 5)
-  ],
-
-  # Per-parent max restart frequency can be disabled, or a parent-wide limit can be used. In the
-  # former case make sure that this limit is higher than the limit of any child.
-  max_restarts: :infinity
+    Parent.child_spec(Child1),
+    Parent.child_spec(Child2, bind_to: [Child1]),
+    Parent.child_spec(Child3, bind_to: [Child1]),
+    Parent.child_spec(Child4, shutdown_group: :children4_to_6),
+    Parent.child_spec(Child5, shutdown_group: :children4_to_6),
+    Parent.child_spec(Child6, shutdown_group: :children4_to_6),
+    Parent.child_spec(Child7, bind_to: [Child1]),
+  ]
 )
 ```
 
-### Binding lifecycles
+- if `Child1` is restarted, `Child2`, `Child3`, and `Child7` will be restarted too
+- if `Child2`, `Child3`, or `Child7` is restarted, nothing else is restarted
+- if any of `Child4`, `Child5`, or `Child6` is restarted, all other processes from the shutdown group are restarted too
+
+### Discovering siblings during startup
 
 ```elixir
-  Parent.Supervisor.start_link(
-    [
-      Parent.child_spec(Child1),
-      Parent.child_spec(Child2, bind_to: [Child1]),
-      Parent.child_spec(Child3, bind_to: [Child1]),
-      Parent.child_spec(Child4, shutdown_group: :children4_to_6),
-      Parent.child_spec(Child5, shutdown_group: :children4_to_6),
-      Parent.child_spec(Child6, shutdown_group: :children4_to_6),
-      Parent.child_spec(Child7, bind_to: [Child1]),
-    ]
-  )
+Parent.Supervisor.start_link(
+  [
+    Parent.child_spec(Child1),
+    Parent.child_spec(Child2, bind_to: [Child1]),
+    # ...
+  ]
+)
+
+defmodule Child2 do
+  def start_link do
+    # can be safely invoked inside the parent process
+    child1 = Parent.child_pid(:child1)
+
+    # ...
+  end
+end
 ```
 
 - if `Child1` is restarted, `Child2`, `Child3`, and `Child7` will be restarted too
@@ -116,6 +126,21 @@ Parent.Supervisor.start_link([], registry?: true)
 # ETS lookup, no call into parent involved
 Parent.Client.child_pid(my_sup, id1)
 Parent.Client.children(my_sup)
+```
+
+### Per-child max restart frequency
+
+```elixir
+Parent.Supervisor.start_link(
+  [
+    Parent.child_spec(Child1, max_restarts: 10, max_seconds: 10),
+    Parent.child_spec(Child2, max_restarts: 3, max_seconds: 5)
+  ],
+
+  # Per-parent max restart frequency can be disabled, or a parent-wide limit can be used. In the
+  # former case make sure that this limit is higher than the limit of any child.
+  max_restarts: :infinity
+)
 ```
 
 ### Module-based supervisor

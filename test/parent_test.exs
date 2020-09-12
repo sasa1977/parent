@@ -711,6 +711,22 @@ defmodule ParentTest do
       assert Parent.child_pid(:child2) == {:ok, child2}
     end
 
+    test "can be invoked while the chid is being started" do
+      Parent.initialize()
+      test_pid = self()
+
+      child1 = start_child!(id: :child1)
+
+      start_child!(
+        start: fn ->
+          send(test_pid, {:child1, Parent.child_pid(:child1)})
+          Agent.start_link(fn -> :ok end)
+        end
+      )
+
+      assert_receive {:child1, {:ok, ^child1}}
+    end
+
     test "fails if the parent is not initialized" do
       assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.child_pid(:foo) end
     end
@@ -1062,7 +1078,8 @@ defmodule ParentTest do
   end
 
   defp start_child(overrides \\ []) do
-    id = Keyword.get(overrides, :id, nil)
+    overrides = Map.new(overrides)
+    id = Map.get(overrides, :id, nil)
     succeed_on_child_start(id)
 
     Parent.child_spec(
