@@ -44,17 +44,12 @@ defmodule Parent.SupervisorTest do
       spec = Elixir.Supervisor.child_spec(MySupervisor, [])
       assert spec.type == :supervisor
       assert spec.shutdown == :infinity
-      assert spec.start == {MySupervisor, :start_link, [[], []]}
+      assert spec.start == {MySupervisor, :start_link, [[]]}
     end
 
-    test "accepts {children, opts}" do
-      spec = Elixir.Supervisor.child_spec({MySupervisor, {[:spec1, :spec2], [foo: :bar]}}, [])
-      assert spec.start == {MySupervisor, :start_link, [[:spec1, :spec2], [foo: :bar]]}
-    end
-
-    test "uses :name for id if provided" do
-      spec = Elixir.Supervisor.child_spec({MySupervisor, {[], [name: :foo]}}, [])
-      assert spec.id == :foo
+    test "passes arg to start_link" do
+      spec = Elixir.Supervisor.child_spec({MySupervisor, :arg}, [])
+      assert spec.start == {MySupervisor, :start_link, [:arg]}
     end
   end
 

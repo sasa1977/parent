@@ -62,15 +62,13 @@ defmodule Parent.Supervisor do
   @doc false
   defmacro __using__(_) do
     quote do
-      @spec child_spec({[Parent.start_spec()], Parent.GenServer.options()} | []) ::
-              Supervisor.child_spec()
-      def child_spec([]), do: child_spec({[], []})
-
-      def child_spec({children, options} = args) do
-        [start: {__MODULE__, :start_link, [children, options]}]
+      def child_spec(arg) do
+        [start: {__MODULE__, :start_link, [arg]}]
         |> Parent.parent_spec()
-        |> Parent.child_spec(id: Keyword.get(options, :name, __MODULE__))
+        |> Parent.child_spec(id: __MODULE__)
       end
+
+      defoverridable child_spec: 1
     end
   end
 end
