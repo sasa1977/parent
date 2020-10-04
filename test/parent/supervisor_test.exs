@@ -22,7 +22,8 @@ defmodule Parent.SupervisorTest do
         name: :my_supervisor
       )
 
-      assert [%{id: :child1}, %{id: :child3}] = Parent.Client.children(:my_supervisor)
+      assert [%{id: :child1}, %{id: :child2}, %{id: :child3}] =
+               Parent.Client.children(:my_supervisor)
     end
 
     test "fails to start if a child fails to start" do

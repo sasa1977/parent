@@ -171,17 +171,6 @@ defmodule Parent.ClientTest do
 
       assert child_ids(parent) == [:child1]
     end
-
-    test "handles :ignore" do
-      parent = start_parent!([child_spec(id: :child1)])
-
-      assert Client.start_child(
-               parent,
-               child_spec(id: :child2, start: fn -> :ignore end)
-             ) == {:ok, :undefined}
-
-      assert child_ids(parent) == [:child1]
-    end
   end
 
   describe "shutdown_child/1" do

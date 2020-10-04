@@ -5,14 +5,16 @@ defmodule Parent.State do
 
   @opaque t :: %{
             opts: Parent.opts(),
-            id_to_pid: %{Parent.child_id() => pid},
-            children: %{pid => child()},
+            id_to_key: %{Parent.child_id() => key},
+            children: %{key => child()},
             startup_index: non_neg_integer,
             restart_counter: RestartCounter.t(),
             registry?: boolean,
-            deps: %{pid => [pid]},
-            shutdown_groups: %{Parent.shutdown_group() => [pid]}
+            deps: %{key => [key]},
+            shutdown_groups: %{Parent.shutdown_group() => [key]}
           }
+
+  @opaque key :: pid | {__MODULE__, reference()}
 
   @type child :: %{
           spec: Parent.child_spec(),
@@ -20,7 +22,8 @@ defmodule Parent.State do
           timer_ref: reference() | nil,
           startup_index: non_neg_integer(),
           restart_counter: RestartCounter.t(),
-          meta: Parent.child_meta()
+          meta: Parent.child_meta(),
+          key: key
         }
 
   @spec initialize(Parent.opts()) :: t
@@ -29,7 +32,7 @@ defmodule Parent.State do
 
     %{
       opts: opts,
-      id_to_pid: %{},
+      id_to_key: %{},
       children: %{},
       startup_index: 0,
       restart_counter: RestartCounter.new(opts[:max_restarts], opts[:max_seconds]),
@@ -47,6 +50,8 @@ defmodule Parent.State do
 
   @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
   def register_child(state, pid, spec, timer_ref) do
+    key = child_key(pid)
+
     false = Map.has_key?(state.children, pid)
 
     child = %{
@@ -55,36 +60,39 @@ defmodule Parent.State do
       timer_ref: timer_ref,
       startup_index: state.startup_index,
       restart_counter: RestartCounter.new(spec.max_restarts, spec.max_seconds),
-      meta: spec.meta
+      meta: spec.meta,
+      key: key
     }
 
     state =
       if is_nil(spec.id),
         do: state,
-        else: Map.update!(state, :id_to_pid, &Map.put(&1, spec.id, pid))
+        else: Map.update!(state, :id_to_key, &Map.put(&1, spec.id, key))
 
     state
-    |> Map.update!(:children, &Map.put(&1, pid, child))
+    |> Map.update!(:children, &Map.put(&1, key, child))
     |> Map.update!(:startup_index, &(&1 + 1))
-    |> update_bindings(pid, spec)
-    |> update_shutdown_groups(pid, spec)
+    |> update_bindings(key, spec)
+    |> update_shutdown_groups(key, spec)
   end
 
   @spec register_child(t, pid, child, reference | nil) :: t
   def reregister_child(state, child, pid, timer_ref) do
+    key = child_key(pid)
+
     false = Map.has_key?(state.children, pid)
 
-    child = %{child | pid: pid, timer_ref: timer_ref, meta: child.spec.meta}
+    child = %{child | pid: pid, timer_ref: timer_ref, meta: child.spec.meta, key: key}
 
     state =
       if is_nil(child.spec.id),
         do: state,
-        else: Map.update!(state, :id_to_pid, &Map.put(&1, child.spec.id, pid))
+        else: Map.update!(state, :id_to_key, &Map.put(&1, child.spec.id, key))
 
     state
-    |> Map.update!(:children, &Map.put(&1, child.pid, child))
-    |> update_bindings(pid, child.spec)
-    |> update_shutdown_groups(pid, child.spec)
+    |> Map.update!(:children, &Map.put(&1, child.key, child))
+    |> update_bindings(key, child.spec)
+    |> update_shutdown_groups(key, child.spec)
   end
 
   @spec children(t) :: [child()]
@@ -103,7 +111,7 @@ defmodule Parent.State do
   @spec pop_child_with_bound_siblings(t, Parent.child_ref()) :: {:ok, [child], t} | :error
   def pop_child_with_bound_siblings(state, child_ref) do
     with {:ok, child} <- child(state, child_ref) do
-      {children, state} = pop_child_and_bound_children(state, child.pid)
+      {children, state} = pop_child_and_bound_children(state, child.key)
       {:ok, children, state}
     end
   end
@@ -113,8 +121,11 @@ defmodule Parent.State do
 
   @spec child(t, Parent.child_ref()) :: {:ok, child} | :error
   def child(_state, nil), do: :error
+  def child(state, {__MODULE__, _ref} = key), do: Map.fetch(state.children, key)
   def child(state, pid) when is_pid(pid), do: Map.fetch(state.children, pid)
-  def child(state, id), do: with({:ok, pid} <- child_pid(state, id), do: child(state, pid))
+
+  def child(state, id),
+    do: with({:ok, key} <- Map.fetch(state.id_to_key, id), do: child(state, key))
 
   @spec child?(t, Parent.child_ref()) :: boolean()
   def child?(state, child_ref), do: match?({:ok, _child}, child(state, child_ref))
@@ -131,7 +142,7 @@ defmodule Parent.State do
   end
 
   @spec child_pid(t, Parent.child_id()) :: {:ok, pid} | :error
-  def child_pid(state, id), do: Map.fetch(state.id_to_pid, id)
+  def child_pid(state, id), do: with({:ok, child} <- child(state, id), do: {:ok, child.pid})
 
   @spec child_meta(t, Parent.child_ref()) :: {:ok, Parent.child_meta()} | :error
   def child_meta(state, child_ref) do
@@ -145,31 +156,34 @@ defmodule Parent.State do
          do: {:ok, child.meta, state}
   end
 
-  defp update_bindings(state, pid, child_spec) do
+  defp child_key(:undefined), do: {__MODULE__, make_ref()}
+  defp child_key(pid) when is_pid(pid), do: pid
+
+  defp update_bindings(state, key, child_spec) do
     Enum.reduce(
       child_spec.binds_to,
       state,
       fn child_ref, state ->
         bound = child!(state, child_ref)
-        %{state | deps: Map.update(state.deps, bound.pid, [pid], &[pid | &1])}
+        %{state | deps: Map.update(state.deps, bound.key, [key], &[key | &1])}
       end
     )
   end
 
-  defp update_shutdown_groups(state, _pid, %{shutdown_group: nil}), do: state
+  defp update_shutdown_groups(state, _key, %{shutdown_group: nil}), do: state
 
-  defp update_shutdown_groups(state, pid, spec) do
+  defp update_shutdown_groups(state, key, spec) do
     Map.update!(
       state,
       :shutdown_groups,
-      &Map.update(&1, spec.shutdown_group, [pid], fn pids -> [pid | pids] end)
+      &Map.update(&1, spec.shutdown_group, [key], fn keys -> [key | keys] end)
     )
   end
 
   defp update(state, child_ref, updater) do
     with {:ok, child} <- child(state, child_ref),
          updated_child = updater.(child),
-         updated_children = Map.put(state.children, child.pid, updated_child),
+         updated_children = Map.put(state.children, child.key, updated_child),
          do: {:ok, updated_child, %{state | children: updated_children}}
   end
 
@@ -190,22 +204,22 @@ defmodule Parent.State do
         do: [child],
         else: children_in_shutdown_group(state, child.spec.shutdown_group)
 
-    collected = Enum.reduce(group_children, collected, &Map.put_new(&2, &1.pid, &1))
+    collected = Enum.reduce(group_children, collected, &Map.put_new(&2, &1.key, &1))
 
     for child <- group_children,
-        dep <- Map.get(state.deps, child.pid, []),
+        dep <- Map.get(state.deps, child.key, []),
         bound_sibling = child!(state, dep),
-        sibling_pid = bound_sibling.pid,
-        not Map.has_key?(collected, bound_sibling.pid),
+        sibling_key = bound_sibling.key,
+        not Map.has_key?(collected, bound_sibling.key),
         reduce: collected do
-      %{^sibling_pid => _} = collected ->
+      %{^sibling_key => _} = collected ->
         collected
 
       collected ->
         child_with_deps(
           state,
           bound_sibling,
-          Map.put(collected, bound_sibling.pid, bound_sibling)
+          Map.put(collected, bound_sibling.key, bound_sibling)
         )
     end
   end
@@ -214,13 +228,13 @@ defmodule Parent.State do
     group = child.spec.shutdown_group
 
     state
-    |> Map.update!(:id_to_pid, &Map.delete(&1, child.spec.id))
-    |> Map.update!(:children, &Map.delete(&1, child.pid))
-    |> Map.update!(:deps, &Map.delete(&1, child.pid))
+    |> Map.update!(:id_to_key, &Map.delete(&1, child.spec.id))
+    |> Map.update!(:children, &Map.delete(&1, child.key))
+    |> Map.update!(:deps, &Map.delete(&1, child.key))
     |> Map.update!(:shutdown_groups, fn
       groups ->
         with %{^group => children} <- groups do
-          case children -- [child.pid] do
+          case children -- [child.key] do
             [] -> Map.delete(groups, group)
             children -> %{groups | group => children}
           end

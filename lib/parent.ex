@@ -199,6 +199,23 @@ defmodule Parent do
   functions such as `update_child_meta/2` or `Parent.Client.update_child_meta/3`, and query it
   through `Parent.Client.child_meta/2`.
 
+  ## Ignored child
+
+  If a child start function returns `:ignore`, the parent assumes that the child process is not
+  started. This can be useful to defer the decision about starting some processes to the latest
+  possible moment.
+
+  In this case, the parent process will treat the child as successfully started. The corresponding
+  entry for the child will exist in internal data structure of the parent, and the child will be
+  included in result of the functions such as `children/0`, with its pid set to `:undefined`.
+
+  If an ignored child is bound to a started child and that child is restarted, the ignored child
+  will be restarted too.
+
+  For children which are started dynamically on-demand, this might lead to memory leaks. In such
+  cases you can include `keep_ignored?: false` in the childspec to instruct the supervisor to avoid
+  keeping the child entry if the start function returns `:ignore`.
+
   ## Building custom parent processes
 
   If available parent behaviours don't fit your purposes, you can consider building your own
@@ -268,7 +285,8 @@ defmodule Parent do
           optional(:max_restarts) => non_neg_integer | :infinity,
           optional(:max_seconds) => pos_integer,
           optional(:binds_to) => [child_ref],
-          optional(:shutdown_group) => shutdown_group
+          optional(:shutdown_group) => shutdown_group,
+          optional(:keep_ignored?) => boolean
         }
 
   @type child_id :: term
@@ -343,17 +361,11 @@ defmodule Parent do
     state = state()
     child_spec = expand_child_spec(child_spec)
 
-    case start_child_process(state, child_spec) do
-      {:ok, pid, timer_ref} ->
-        state = State.register_child(state, pid, child_spec, timer_ref)
-        store(state)
-        {:ok, pid}
+    with {:ok, pid, timer_ref} <- start_child_process(state, child_spec) do
+      if pid != :undefined or child_spec.keep_ignored?,
+        do: store(State.register_child(state, pid, child_spec, timer_ref))
 
-      :ignore ->
-        {:ok, :undefined}
-
-      error ->
-        error
+      {:ok, pid}
     end
   end
 
@@ -608,7 +620,8 @@ defmodule Parent do
       max_restarts: :infinity,
       max_seconds: :timer.seconds(5),
       binds_to: [],
-      shutdown_group: nil
+      shutdown_group: nil,
+      keep_ignored?: true
     }
   end
 
@@ -622,17 +635,25 @@ defmodule Parent do
 
   @doc false
   def start_child_process(state, child_spec) do
-    with :ok <- validate_spec(state, child_spec),
-         {:ok, pid} <- invoke_start_function(child_spec.start) do
-      timer_ref =
-        case child_spec.timeout do
-          :infinity -> nil
-          timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
-        end
+    with :ok <- validate_spec(state, child_spec) do
+      case invoke_start_function(child_spec.start) do
+        :ignore ->
+          {:ok, :undefined, nil}
 
-      if State.registry?(state), do: Registry.register(pid, child_spec)
+        {:ok, pid} ->
+          timer_ref =
+            case child_spec.timeout do
+              :infinity -> nil
+              timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
+            end
 
-      {:ok, pid, timer_ref}
+          if State.registry?(state), do: Registry.register(pid, child_spec)
+
+          {:ok, pid, timer_ref}
+
+        error ->
+          error
+      end
     end
   end
 
@@ -793,6 +814,8 @@ defmodule Parent do
     sync_stop_process(child.pid, exit_signal, wait_time)
     if State.registry?(state()), do: Registry.unregister(child.pid)
   end
+
+  defp sync_stop_process(:undefined, _exit_signal, _wait_time), do: :ok
 
   defp sync_stop_process(pid, exit_signal, wait_time) do
     # Using monitors to detect process termination. In most cases links would suffice, but

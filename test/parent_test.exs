@@ -92,11 +92,6 @@ defmodule ParentTest do
       assert {:ok, _pid} = start_child(binds_to: ~w/child1 child2/a)
     end
 
-    test "handles :ignore by the started process" do
-      Parent.initialize()
-      assert start_child(start: fn -> :ignore end) == {:ok, :undefined}
-    end
-
     test "handles error by the started process" do
       Parent.initialize()
       assert start_child(start: fn -> {:error, :some_reason} end) == {:error, :some_reason}
@@ -1048,6 +1043,90 @@ defmodule ParentTest do
 
       Parent.shutdown_child(hd(Parent.children()).pid)
       assert [%{pid: ^child6}] = Parent.children()
+    end
+  end
+
+  describe "ignored child" do
+    test "is represented with the `:undefined` pid" do
+      Parent.initialize()
+      assert start_child(id: :child1, start: fn -> :ignore end) == {:ok, :undefined}
+      assert start_child(id: :child2, start: fn -> :ignore end) == {:ok, :undefined}
+
+      assert [%{id: :child1, pid: :undefined}, %{id: :child2, pid: :undefined}] =
+               Parent.children()
+
+      assert Parent.child_pid(:child1) == {:ok, :undefined}
+      assert Parent.child_pid(:child2) == {:ok, :undefined}
+    end
+
+    test "is not stored when keep_ignored? is set to true" do
+      Parent.initialize()
+
+      assert start_child(id: :child1, start: fn -> :ignore end, keep_ignored?: false) ==
+               {:ok, :undefined}
+
+      start_child!(id: :child2, start: fn -> :ignore end)
+
+      assert [%{id: :child2, pid: :undefined}] = Parent.children()
+    end
+
+    test "can be stopped" do
+      Parent.initialize()
+      start_child!(id: :child1, start: fn -> :ignore end)
+      start_child!(id: :child2, start: fn -> :ignore end)
+
+      assert {:ok, %{child1: %{pid: :undefined}}} = Parent.shutdown_child(:child1)
+      assert [%{id: :child2}] = Parent.children()
+    end
+
+    test "can be restarted" do
+      Parent.initialize()
+      start_child!(id: :child, start: fn -> :ignore end)
+
+      assert Parent.restart_child(:child) == {:ok, %{}}
+      assert [%{id: :child}] = Parent.children()
+
+      # trying once more to verify that a child is successfully reregistered
+      assert Parent.restart_child(:child) == {:ok, %{}}
+      assert [%{id: :child}] = Parent.children()
+    end
+
+    test "is stopped together with its dependency" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      start_child!(id: :child2, start: fn -> :ignore end, binds_to: [:child1])
+
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
+      assert %{child2: %{pid: :undefined}} = stopped_children
+
+      assert Parent.children() == []
+    end
+
+    test "can be a dependency" do
+      Parent.initialize()
+
+      start_child!(id: :child1, start: fn -> :ignore end)
+      start_child!(id: :child2, binds_to: [:child1])
+
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
+      assert Parent.children() == []
+
+      assert Parent.return_children(stopped_children) == %{}
+      assert Enum.map(Parent.children(), & &1.id) == [:child1, :child2]
+    end
+
+    test "can be in the shutdown group with other children" do
+      Parent.initialize()
+
+      start_child!(id: :child1, start: fn -> :ignore end, shutdown_group: :group1)
+      start_child!(id: :child2, shutdown_group: :group1)
+
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
+      assert Parent.children() == []
+
+      Parent.return_children(stopped_children)
+      {:ok, _} = Parent.shutdown_child(:child2)
+      assert Parent.children() == []
     end
   end
 
