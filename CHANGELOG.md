@@ -1,4 +1,4 @@
-# 0.11.0
+# 0.11.0-rc.0
 
 This version adds the remaining of the `Supervisor` behaviour to `Parent`, such as automatic child restarts, self-termination when maximum restart intensity is exceeded, and binding lifecycles of children. The new high-level module `Parent.Supervisor` provides the highest-level interface, roughly comparable to a callbackless `Supervisor`. However, all of the parenting features are available in lower level modules, `Parent.GenServer` (which is similar to a callback-based `Supervisor` + `GenServer`) and `Parent` (which can be thought of as a toolkit for building custom parent behaviours and processes). The new module `Parent.Client` can be used to interact with any parent process from the outside (i.e. from other processes).
 
