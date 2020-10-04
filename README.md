@@ -71,10 +71,6 @@ defmodule Child2 do
 end
 ```
 
-- if `Child1` is restarted, `Child2`, `Child3`, and `Child7` will be restarted too
-- if `Child2`, `Child3`, or `Child7` is restarted, nothing else is restarted
-- if any of `Child4`, `Child5`, or `Child6` is restarted, all other processes from the shutdown group are restarted too
-
 ### Pausing and resuming a part of the system
 
 ```elixir
