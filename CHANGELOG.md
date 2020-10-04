@@ -1,5 +1,17 @@
 # 0.11.0
 
+This version adds the remaining of the `Supervisor` behaviour to `Parent`, such as automatic child restarts, self-termination when maximum restart intensity is exceeded, and binding lifecycles of children. The new high-level module `Parent.Supervisor` provides the highest-level interface, roughly comparable to a callbackless `Supervisor`. However, all of the parenting features are available in lower level modules, `Parent.GenServer` (which is similar to a callback-based `Supervisor` + `GenServer`) and `Parent` (which can be thought of as a toolkit for building custom parent behaviours and processes). The new module `Parent.Client` can be used to interact with any parent process from the outside (i.e. from other processes).
+
+Beyond just mirroring supervisor functionality, `Parent` explores some different approaches, most notably:
+
+- There are no supervision strategies. Instead, the options `:binds_to` and `:shutdown_group` can be used to bind lifecycles of children.
+- There's no special option for controlling dynamic mode (aka `:simple_one_for_one` or `DynamicSupervisor`). In the vast majority of cases the usage is exactly the same, and you can easily combine statical and dynamical children under the same supervisor.
+- Parent supports more fine-grained children discovery, and an optional `:registry?` option for exposing children info via ETS table.
+
+As a result, `Parent` can help in flattening and simplifying the supervision tree.
+
+Refer to documentation for more details.
+
 ## Breaking changes
 
 - Requires Elixir 1.10+
@@ -11,7 +23,11 @@
 
 ## Additions
 
-- Support for automatic restarts of children via the `:restart` option.
+- Support for automatic restarts of children via the `:restart` option, and maximum restart intensity via the `:max_restarts` option.
+- Support for binding children lifecycles via options `:binds_to` and `:shutdown_group`.
+- Parent can also act as an ETS-based registry using the `registry?: true` parent option.
+- Added `Parent.Supervisor`, which provides a high-level supervisor-like functionality.
+- Added `Parent.Client`, which provides API for interacting with parent processes from the outside.
 
 # 0.10.0
 
