@@ -42,8 +42,8 @@ defmodule Parent.MixProject do
 
   defp docs() do
     [
-      extras: ["RATIONALE.md"],
-      main: "Parent",
+      extras: ["RATIONALE.md", "README.md"],
+      main: "readme",
       source_url: "https://github.com/sasa1977/parent/",
       source_ref: @version,
       groups_for_modules: [
