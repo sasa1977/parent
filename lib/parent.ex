@@ -315,8 +315,6 @@ defmodule Parent do
           }
         }
 
-  @type restart_opts :: [include_temporary?: boolean]
-
   @type on_start_child :: Supervisor.on_start_child() | {:error, start_error}
   @type start_error ::
           :invalid_child_id
@@ -395,7 +393,7 @@ defmodule Parent do
   Restarts the child.
 
   This function will also restart all siblings which are bound to this child, including temporary
-  children. You can change this behaviour by passing `include_temporary?: false`.
+  children.
 
   The function might partially succeed if some non-temporary children fail to start. In this case
   the resulting `stopped_children` map will contain the corresponding entries. You can pass this
@@ -403,13 +401,12 @@ defmodule Parent do
 
   See "Restart flow" for details on restarting procedure.
   """
-  @spec restart_child(child_ref, restart_opts) :: {:ok, stopped_children} | :error
-  def restart_child(child_ref, opts \\ []) do
+  @spec restart_child(child_ref) :: {:ok, stopped_children} | :error
+  def restart_child(child_ref) do
     with {:ok, children, state} <- State.pop_child_with_bound_siblings(state(), child_ref) do
-      opts = Keyword.merge([include_temporary?: true], opts)
       stop_children(children, :shutdown)
       children = Enum.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_ref))
-      {stopped_children, state} = Restart.perform(state, children, opts)
+      {stopped_children, state} = Restart.perform(state, children)
       store(state)
       {:ok, stopped_children}
     end
@@ -420,17 +417,15 @@ defmodule Parent do
 
   This function can be invoked to return stopped children back to the parent. Essentially, this
   function behaves almost the same as automatic restart, with a difference that temporary children
-  are by default also returned. You can change this behaviour by passing `include_temporary?:
-  false`.
+  are by default also returned.
 
   The `stopped_children` information is obtained via functions such as `shutdown_child/1` or
   `shutdown_all/1`. In addition, Parent will provide this info via `handle_message/1`  when some
   children are terminated and not returned to the parent.
   """
-  @spec return_children(stopped_children, restart_opts) :: stopped_children
-  def return_children(stopped_children, opts \\ []) do
-    opts = Keyword.merge([include_temporary?: true], opts)
-    {stopped_children, state} = Restart.perform(state(), Map.values(stopped_children), opts)
+  @spec return_children(stopped_children) :: stopped_children
+  def return_children(stopped_children) do
+    {stopped_children, state} = Restart.perform(state(), Map.values(stopped_children))
     store(state)
     stopped_children
   end

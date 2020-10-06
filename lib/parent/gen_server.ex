@@ -101,7 +101,7 @@ defmodule Parent.GenServer do
       end
 
       def handle_info({:restart, stopped_children}, state) do
-        Parent.return_children(stopped_children, include_temporary?: true)
+        Parent.return_children(stopped_children)
         {:noreply, state}
       end
 

@@ -2,7 +2,7 @@ defmodule Parent.Restart do
   alias Parent.State
 
   # core logic of all restarts, both automatic and manual
-  def perform(state, children, opts \\ []) do
+  def perform(state, children) do
     to_start =
       children
       # reject already started children (idempotence)
@@ -10,7 +10,7 @@ defmodule Parent.Restart do
       |> Enum.sort_by(& &1.startup_index)
 
     {to_start, state} = record_restart(state, to_start)
-    {to_start, ignored} = exclude_ignored(to_start, opts)
+    {to_start, ignored} = exclude_ignored(to_start)
     {not_started, state, start_error} = return_children(state, to_start)
     {all_ignored, state} = finalize_restart(state, not_started, ignored, start_error)
     {Parent.stopped_children(all_ignored), state}
@@ -41,11 +41,10 @@ defmodule Parent.Restart do
     end
   end
 
-  defp exclude_ignored(to_start, opts) do
+  defp exclude_ignored(to_start) do
     Enum.split_with(
       to_start,
-      &(&1[:force_restart?] == true or &1.spec.restart != :temporary or
-          Keyword.get(opts, :include_temporary?, false))
+      fn _ -> true end
     )
   end
 

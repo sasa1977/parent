@@ -360,16 +360,6 @@ defmodule ParentTest do
       assert child_pid!(:child6) == child6
     end
 
-    test "skips temporary bound siblings with include_temporary?: false" do
-      Parent.initialize()
-
-      start_child!(id: :child1, restart: :temporary)
-      start_child!(id: :child2, restart: :temporary, binds_to: [:child1])
-
-      assert {:ok, %{child2: _}} = Parent.restart_child(:child1, include_temporary?: false)
-      assert [%{id: :child1}] = Parent.children()
-    end
-
     test "fails if the parent is not initialized" do
       assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.restart_child(1) end
     end
@@ -456,21 +446,21 @@ defmodule ParentTest do
       assert [%{id: :child1}, %{id: :child2}] = Parent.children()
     end
 
-    test "also restarts non-temporary bound siblings" do
+    test "also restarts all bound siblings" do
       Parent.initialize()
 
       child1 = start_child!(id: :child1, shutdown_group: :group1)
       child2 = start_child!(id: :child2, binds_to: [:child1])
-      start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
+      child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
       child4 = start_child!(id: :child4, shutdown_group: :group1)
       child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
       child6 = start_child!(id: :child6)
 
-      assert {:stopped_children, %{child3: _}} = provoke_child_restart!(:child4)
-      refute Parent.child?(:child3)
+      assert :ignore = provoke_child_restart!(:child4)
 
       refute child_pid!(:child1) == child1
       refute child_pid!(:child2) == child2
+      refute child_pid!(:child3) == child3
       refute child_pid!(:child4) == child4
       refute child_pid!(:child5) == child5
       assert child_pid!(:child6) == child6
@@ -1001,13 +991,13 @@ defmodule ParentTest do
       start_child!(id: :child3, binds_to: [:child1], restart: :temporary, max_restarts: 1)
 
       stopped_children = provoke_child_termination!(:child3, at: 0)
-      Parent.return_children(stopped_children, include_temporary?: true)
+      Parent.return_children(stopped_children)
 
       stopped_children = provoke_child_termination!(:child3, at: 0)
 
       log =
         assert_parent_exit(
-          fn -> Parent.return_children(stopped_children, include_temporary?: true) end,
+          fn -> Parent.return_children(stopped_children) end,
           :too_many_restarts
         )
 
