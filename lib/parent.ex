@@ -375,7 +375,7 @@ defmodule Parent do
   If some child fails to start, all of the children will be taken down and the parent process
   will exit.
   """
-  @spec start_all_children!([child_spec]) :: [pid | :undefined]
+  @spec start_all_children!([start_spec()]) :: [pid | :undefined]
   def start_all_children!(child_specs) do
     Enum.map(
       child_specs,

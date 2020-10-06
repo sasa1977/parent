@@ -16,7 +16,7 @@ defmodule Parent.Registry do
     )
   end
 
-  @spec table(pid) :: {:ok, table} | :error
+  @spec table(GenServer.server()) :: {:ok, table} | :error
   def table(parent), do: MetaRegistry.table(GenServer.whereis(parent))
 
   @spec register(pid, Parent.child_spec()) :: :ok
