@@ -60,7 +60,6 @@ defmodule Parent do
 
     - `:permanent` - A child is automatically restarted if it stops. This is the default value.
     - `:transient` - A child is automatically restarted only if it exits abnormally.
-    - `:with_dep` - A child is restarted only if its dependency is restarted.
     - `:temporary` - A child is not automatically restarted.
 
   ## Maximum restart frequency
@@ -102,7 +101,7 @@ defmodule Parent do
 
   Finally, because of binding semantics (see Lifecycle dependency consequences), a child can only
   be bound to a sibling with the same or stronger restart option, where restart strengths can
-  be defined as permanent > transient > with_dep > temporary. So for example, a permanent child
+  be defined as permanent > transient > temporary. So for example, a permanent child
   can't be bound to a temporary child.
 
   ## Shutdown groups
@@ -281,7 +280,7 @@ defmodule Parent do
           optional(:meta) => child_meta,
           optional(:shutdown) => shutdown,
           optional(:timeout) => pos_integer | :infinity,
-          optional(:restart) => :temporary | :transient | :with_dep | :permanent,
+          optional(:restart) => :temporary | :transient | :permanent,
           optional(:max_restarts) => non_neg_integer | :infinity,
           optional(:max_seconds) => pos_integer,
           optional(:binds_to) => [child_ref],
@@ -690,12 +689,10 @@ defmodule Parent do
       #
       # 1. A child can bind to a dep with the same restart strategy
       # 2. Transient child can bind to a permanent child
-      # 3. with_dep child can bind to a transient and a permanent child
-      # 4. Temporary child can bind to everyone
+      # 3. Temporary child can bind to everyone
 
       from == to or
         (from == :transient and to == :permanent) or
-        (from == :with_dep and to in ~w/transient permanent/a) or
         from == :temporary
     end)
     |> Enum.map(&with nil <- &1.spec.id, do: &1.spec.pid)

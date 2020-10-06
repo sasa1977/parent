@@ -118,9 +118,8 @@ defmodule ParentTest do
     end
 
     for {from, tos} <- [
-          permanent: ~w/transient with_dep temporary/a,
-          transient: ~w/with_dep temporary/a,
-          with_dep: ~w/temporary/a
+          permanent: ~w/transient temporary/a,
+          transient: ~w/temporary/a
         ],
         to <- tos do
       test "fails on forbidden dependency from #{from} to #{to}" do
@@ -135,8 +134,8 @@ defmodule ParentTest do
     test "exits when children in a shutdown group don't have the same restart type" do
       Parent.initialize()
 
-      for r1 <- ~w/temporary transient with_dep temporary/a,
-          r2 <- ~w/temporary transient with_dep temporary/a,
+      for r1 <- ~w/temporary transient temporary/a,
+          r2 <- ~w/temporary transient temporary/a,
           r1 != r2 do
         Parent.shutdown_all()
         start_child!(id: :child1, restart: r1, shutdown_group: :group)
@@ -414,15 +413,6 @@ defmodule ParentTest do
       refute Parent.child?(:child)
     end
 
-    test "is not performed when a with_dep child terminates" do
-      Parent.initialize()
-      child = start_child!(id: :child, restart: :with_dep)
-      Process.exit(child, :kill)
-
-      refute match?({:child_restarted, _restart_info}, handle_parent_message())
-      refute Parent.child?(:child)
-    end
-
     test "is not performed when a child is terminated via `Parent` function" do
       Parent.initialize()
       start_child!(id: :child)
@@ -474,8 +464,7 @@ defmodule ParentTest do
       start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
       child4 = start_child!(id: :child4, shutdown_group: :group1)
       child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
-      child6 = start_child!(id: :child6, restart: :with_dep, binds_to: [:child5])
-      child7 = start_child!(id: :child7)
+      child6 = start_child!(id: :child6)
 
       assert {:stopped_children, %{child3: _}} = provoke_child_restart!(:child4)
       refute Parent.child?(:child3)
@@ -484,8 +473,7 @@ defmodule ParentTest do
       refute child_pid!(:child2) == child2
       refute child_pid!(:child4) == child4
       refute child_pid!(:child5) == child5
-      refute child_pid!(:child6) == child6
-      assert child_pid!(:child7) == child7
+      assert child_pid!(:child6) == child6
     end
 
     test "takes down the entire parent on too many global restarts" do
