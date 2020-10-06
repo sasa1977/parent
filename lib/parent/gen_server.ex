@@ -75,7 +75,10 @@ defmodule Parent.GenServer do
             {:ok, _} = Parent.start_child(%{
               id: :job,
               start: {Task, :start_link, [fn -> job(arg) end]},
-              restart: :temporary
+              restart: :temporary,
+
+              # handle_stopped_children won't be invoked without this
+              ephemeral?: true
             })
             {:ok, nil}
           end
@@ -169,6 +172,7 @@ defmodule Parent.GenServer do
 
     - a child is terminated by invoking `Parent` functions such as `Parent.shutdown_child/1`
     - a child is restarted
+    - a child is not ephemeral (see "Ephemeral children" in `Parent` for details)
   """
   @callback handle_stopped_children(info :: Parent.stopped_children(), state) ::
               {:noreply, new_state}

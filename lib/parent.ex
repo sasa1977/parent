@@ -62,6 +62,13 @@ defmodule Parent do
     - `:transient` - A child is automatically restarted only if it exits abnormally.
     - `:temporary` - A child is not automatically restarted.
 
+  Note that these rules refer to the situations when a child is restarted due to its own crash.
+  If a child is bound to a dependency which is being restarted, it will also be restarted, unless
+  its marked as ephemeral. In addition, a child will always be restarted if it or its dependency
+  is explicitly restarted with `restart_child/1`.
+
+  See "Bound children" and "Ephemeral children" for details.
+
   ## Maximum restart frequency
 
   Similarly to `Supervisor`, a parent process keeps track of the amount of restarts, and
@@ -198,22 +205,26 @@ defmodule Parent do
   functions such as `update_child_meta/2` or `Parent.Client.update_child_meta/3`, and query it
   through `Parent.Client.child_meta/2`.
 
-  ## Ignored child
+  ## Ephemeral children
 
-  If a child start function returns `:ignore`, the parent assumes that the child process is not
-  started. This can be useful to defer the decision about starting some processes to the latest
-  possible moment.
+  By default children are not ephemeral, which means that the child will not be automatically
+  removed from the list of children in the following cases:
 
-  In this case, the parent process will treat the child as successfully started. The corresponding
-  entry for the child will exist in internal data structure of the parent, and the child will be
-  included in result of the functions such as `children/0`, with its pid set to `:undefined`.
+    - the child start function returns `:ignore`
+    - a transient child terminates normally
+    - a temporary child terminates
 
-  If an ignored child is bound to a started child and that child is restarted, the ignored child
-  will be restarted too.
+  In all these cases, the child will remain in the list of children, with it's pid set to
+  `:undefined`. Such child might even be automatically restarted if its dependency is restarted.
 
-  For children which are started dynamically on-demand, this might lead to memory leaks. In such
-  cases you can include `keep_ignored?: false` in the childspec to instruct the supervisor to avoid
-  keeping the child entry if the start function returns `:ignore`.
+  This behaviour is typically desired for "static" supervisors where the list of children is
+  predefined and finite. However, when you're adding children dynamically, you typically want the
+  child to be "forgotten" after it stops (or if it decides not to start by returning `:ignore`).
+  In such cases you can mark the child as ephemeral by including `ephemeral?: true` option in the
+  child specification.
+
+  An ephemeral child will be removed from the child list when it stops. It also won't be restarted
+  if its dependency is restarted.
 
   ## Building custom parent processes
 
@@ -285,7 +296,7 @@ defmodule Parent do
           optional(:max_seconds) => pos_integer,
           optional(:binds_to) => [child_ref],
           optional(:shutdown_group) => shutdown_group,
-          optional(:keep_ignored?) => boolean
+          optional(:ephemeral?) => boolean
         }
 
   @type child_id :: term
@@ -359,7 +370,7 @@ defmodule Parent do
     child_spec = expand_child_spec(child_spec)
 
     with {:ok, pid, timer_ref} <- start_child_process(state, child_spec) do
-      if pid != :undefined or child_spec.keep_ignored?,
+      if pid != :undefined or not child_spec.ephemeral?,
         do: store(State.register_child(state, pid, child_spec, timer_ref))
 
       {:ok, pid}
@@ -392,8 +403,8 @@ defmodule Parent do
   @doc """
   Restarts the child.
 
-  This function will also restart all siblings which are bound to this child, including temporary
-  children.
+  This function will also restart all siblings which are bound to this child, including
+  ephemeral children.
 
   The function might partially succeed if some non-temporary children fail to start. In this case
   the resulting `stopped_children` map will contain the corresponding entries. You can pass this
@@ -405,8 +416,7 @@ defmodule Parent do
   def restart_child(child_ref) do
     with {:ok, children, state} <- State.pop_child_with_bound_siblings(state(), child_ref) do
       stop_children(children, :shutdown)
-      children = Enum.map(children, &Map.put(&1, :force_restart?, &1.spec.id == child_ref))
-      {stopped_children, state} = Restart.perform(state, children)
+      {stopped_children, state} = Restart.perform(state, children, include_ephemeral?: true)
       store(state)
       {:ok, stopped_children}
     end
@@ -425,7 +435,9 @@ defmodule Parent do
   """
   @spec return_children(stopped_children) :: stopped_children
   def return_children(stopped_children) do
-    {stopped_children, state} = Restart.perform(state(), Map.values(stopped_children))
+    {stopped_children, state} =
+      Restart.perform(state(), Map.values(stopped_children), include_ephemeral?: true)
+
     store(state)
     stopped_children
   end
@@ -615,7 +627,7 @@ defmodule Parent do
       max_seconds: :timer.seconds(5),
       binds_to: [],
       shutdown_group: nil,
-      keep_ignored?: true
+      ephemeral?: false
     }
   end
 
@@ -765,10 +777,24 @@ defmodule Parent do
     stop_children(bound_siblings, :shutdown)
     stopped_children = stopped_children([child | bound_siblings])
 
-    if child.spec.restart == :permanent or
-         (child.spec.restart == :transient and reason != :normal),
-       do: auto_restart(state, stopped_children),
-       else: {{:stopped_children, stopped_children}, state}
+    cond do
+      child.spec.restart == :permanent or (child.spec.restart == :transient and reason != :normal) ->
+        auto_restart(state, stopped_children)
+
+      child.spec.ephemeral? ->
+        {{:stopped_children, stopped_children}, state}
+
+      true ->
+        # Non-ephemeral temporary or transient child stopped and won't be restarted.
+        # We'll return all children with pid undefined.
+
+        state =
+          stopped_children
+          |> Map.values()
+          |> Enum.reduce(state, &State.reregister_child(&2, &1, :undefined, nil))
+
+        {:ignore, state}
+    end
   end
 
   defp auto_restart(state, stopped_children) do

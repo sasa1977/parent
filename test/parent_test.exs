@@ -340,12 +340,15 @@ defmodule ParentTest do
       assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
 
-    test "by default restarts all bound siblings" do
+    test "restarts all bound siblings" do
       Parent.initialize()
 
       child1 = start_child!(id: :child1, shutdown_group: :group1)
       child2 = start_child!(id: :child2, binds_to: [:child1])
-      child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
+
+      child3 =
+        start_child!(id: :child3, restart: :temporary, ephemeral?: true, binds_to: [:child2])
+
       child4 = start_child!(id: :child4, shutdown_group: :group1)
       child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
       child6 = start_child!(id: :child6)
@@ -400,7 +403,7 @@ defmodule ParentTest do
       Process.exit(child, :kill)
 
       refute match?({:child_restarted, _restart_info}, handle_parent_message())
-      refute Parent.child?(:child)
+      assert Parent.child_pid(:child) == {:ok, :undefined}
     end
 
     test "is not performed when a child is terminated via `Parent` function" do
@@ -446,7 +449,7 @@ defmodule ParentTest do
       assert [%{id: :child1}, %{id: :child2}] = Parent.children()
     end
 
-    test "also restarts all bound siblings" do
+    test "also restarts all bound siblings except for temporary dynamic" do
       Parent.initialize()
 
       child1 = start_child!(id: :child1, shutdown_group: :group1)
@@ -454,16 +457,23 @@ defmodule ParentTest do
       child3 = start_child!(id: :child3, restart: :temporary, binds_to: [:child2])
       child4 = start_child!(id: :child4, shutdown_group: :group1)
       child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
-      child6 = start_child!(id: :child6)
 
-      assert :ignore = provoke_child_restart!(:child4)
+      child6 =
+        start_child!(id: :child6, ephemeral?: true, restart: :transient, binds_to: [:child2])
+
+      start_child!(id: :child7, ephemeral?: true, restart: :temporary, binds_to: [:child2])
+      child8 = start_child!(id: :child8)
+
+      assert {:stopped_children, %{child7: _}} = provoke_child_restart!(:child4)
+      refute Parent.child?(:child7)
 
       refute child_pid!(:child1) == child1
       refute child_pid!(:child2) == child2
       refute child_pid!(:child3) == child3
       refute child_pid!(:child4) == child4
       refute child_pid!(:child5) == child5
-      assert child_pid!(:child6) == child6
+      refute child_pid!(:child6) == child6
+      assert child_pid!(:child8) == child8
     end
 
     test "takes down the entire parent on too many global restarts" do
@@ -795,7 +805,7 @@ defmodule ParentTest do
   describe "handle_message/1" do
     test "handles child termination" do
       Parent.initialize()
-      child = start_child!(id: :child, meta: :meta, restart: :temporary)
+      child = start_child!(id: :child, meta: :meta, restart: :temporary, ephemeral?: true)
       GenServer.stop(child)
 
       assert {:stopped_children, info} = handle_parent_message()
@@ -817,17 +827,20 @@ defmodule ParentTest do
       {:ok, child1} = start_child(id: :child1, restart: :transient)
       {:ok, child2} = start_child(id: :child2, restart: :temporary, binds_to: [:child1])
       {:ok, child3} = start_child(id: :child3, restart: :temporary, binds_to: [:child1])
-      {:ok, _child4} = start_child(id: :child4, restart: :temporary)
+      {:ok, child4} = start_child(id: :child4, restart: :temporary)
 
       Enum.each([child2, child3], &Process.monitor/1)
 
       GenServer.stop(child1)
 
-      assert {:stopped_children, info} = handle_parent_message()
-      assert Map.keys(info) == ~w/child1 child2 child3/a
+      assert handle_parent_message() == :ignore
 
-      assert Parent.num_children() == 1
-      assert [%{id: :child4}] = Parent.children()
+      assert Enum.map(Parent.children(), &{&1.id, &1.pid}) == [
+               child1: :undefined,
+               child2: :undefined,
+               child3: :undefined,
+               child4: child4
+             ]
 
       assert_receive {:DOWN, _mref, :process, pid1, :shutdown}
       assert_receive {:DOWN, _mref, :process, pid2, :shutdown}
@@ -836,15 +849,9 @@ defmodule ParentTest do
 
     test "handles child timeout by stopping the child" do
       Parent.initialize()
-      child = start_child!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
-
-      assert {:stopped_children, info} = handle_parent_message()
-      assert %{child: %{exit_reason: :timeout}} = info
-
-      assert Parent.num_children() == 0
-      assert Parent.children() == []
-      assert Parent.child_id(child) == :error
-      assert Parent.child_pid(:child) == :error
+      start_child!(id: :child, restart: :temporary, meta: :meta, timeout: 0)
+      handle_parent_message()
+      assert Parent.child_pid(:child) == {:ok, :undefined}
     end
 
     test "handles supervisor calls" do
@@ -988,7 +995,14 @@ defmodule ParentTest do
       Parent.initialize()
       start_child!(id: :child1, restart: :temporary)
       start_child!(id: :child2)
-      start_child!(id: :child3, binds_to: [:child1], restart: :temporary, max_restarts: 1)
+
+      start_child!(
+        id: :child3,
+        binds_to: [:child1],
+        restart: :temporary,
+        ephemeral?: true,
+        max_restarts: 1
+      )
 
       stopped_children = provoke_child_termination!(:child3, at: 0)
       Parent.return_children(stopped_children)
@@ -1037,10 +1051,10 @@ defmodule ParentTest do
       assert Parent.child_pid(:child2) == {:ok, :undefined}
     end
 
-    test "is not stored when keep_ignored? is set to true" do
+    test "is not stored when child is dynamic" do
       Parent.initialize()
 
-      assert start_child(id: :child1, start: fn -> :ignore end, keep_ignored?: false) ==
+      assert start_child(id: :child1, start: fn -> :ignore end, ephemeral?: true) ==
                {:ok, :undefined}
 
       start_child!(id: :child2, start: fn -> :ignore end)
@@ -1105,6 +1119,51 @@ defmodule ParentTest do
       Parent.return_children(stopped_children)
       {:ok, _} = Parent.shutdown_child(:child2)
       assert Parent.children() == []
+    end
+  end
+
+  describe "ephemeral child" do
+    test "is removed when it stops and isn't restarted" do
+      Parent.initialize()
+      start_child!(id: :child1, ephemeral?: true, start: fn -> :ignore end)
+
+      start_child!(
+        id: :child2,
+        ephemeral?: true,
+        restart: :transient,
+        start: {Task, :start_link, [fn -> :ok end]}
+      )
+
+      start_child!(
+        id: :child3,
+        ephemeral?: true,
+        restart: :temporary,
+        start: {Task, :start_link, [fn -> :ok end]}
+      )
+
+      assert {:stopped_children, _} = handle_parent_message()
+      assert {:stopped_children, _} = handle_parent_message()
+
+      assert Parent.children() == []
+    end
+
+    test "takes down non-ephemeral bound siblings when stopped" do
+      Parent.initialize()
+
+      start_child!(id: :child1, ephemeral?: true)
+      start_child!(id: :child2, ephemeral?: false, binds_to: [:child1])
+
+      assert {:ok, %{child1: _, child2: _}} = Parent.shutdown_child(:child1)
+      assert Parent.children() == []
+    end
+
+    test "is not restarted if its dependency is restarted" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      start_child!(id: :child2, ephemeral?: true, restart: :temporary, binds_to: [:child1])
+
+      assert %{child2: _} = provoke_child_termination!(:child1, at: 0)
+      refute Parent.child?(:child2)
     end
   end
 

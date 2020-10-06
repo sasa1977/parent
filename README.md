@@ -88,8 +88,9 @@ Parent.Client.return_children(some_parent, stopped_children)
 ```elixir
 Parent.Supervisor.start_link([])
 
-{:ok, pid1} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil))
-{:ok, pid2} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil))
+# set `ephemeral?: true` for dynamic children if child is temporary/transient
+{:ok, pid1} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil, ephemeral?: true))
+{:ok, pid2} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil, ephemeral?: true))
 # ...
 
 Parent.Client.shutdown_child(MySup, pid1)
@@ -102,8 +103,8 @@ Parent.Client.restart_child(MySup, pid2)
 Parent.Supervisor.start_link([], name: MySup)
 
 # meta is an optional value associated with the child
-Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id1, meta: some_meta))
-Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id2, meta: another_meta))
+Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id1, ephemeral?: true, meta: some_meta))
+Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id2, ephemeral?: true, meta: another_meta))
 # ...
 
 # synchronous calls into the parent process
@@ -167,7 +168,8 @@ defmodule MySup do
 
   @impl GenServer
   def init(_init_arg) do
-    # Make sure that children are temporary b/c otherwise `handle_stopped_children/2` won't be invoked.
+    # Make sure that children are temporary and ephemeral b/c otherwise `handle_stopped_children/2`
+    # won't be invoked.
     Parent.start_all_children!(children)
     {:ok, initial_state}
   end

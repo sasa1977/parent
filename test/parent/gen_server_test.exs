@@ -64,7 +64,7 @@ defmodule Parent.GenServerTest do
   test "invokes handle_stopped_children/2 when a temporary worker stops" do
     server = start_server!()
 
-    child = start_child!(server, id: :child, meta: :meta, restart: :temporary)
+    child = start_child!(server, id: :child, meta: :meta, restart: :temporary, ephemeral?: true)
 
     :erlang.trace(server, true, [:call])
     :erlang.trace_pattern({TestServer, :handle_stopped_children, 2}, [])

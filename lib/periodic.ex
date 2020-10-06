@@ -431,7 +431,8 @@ defmodule Periodic do
         timeout: state.timeout,
         shutdown: state.job_shutdown,
         restart: :temporary,
-        meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
+        meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)},
+        ephemeral?: true
       })
 
     telemetry(state, :started, %{job: pid})
