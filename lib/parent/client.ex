@@ -56,16 +56,14 @@ defmodule Parent.Client do
           {:ok, Parent.stopped_children()} | :error
   def shutdown_child(parent, child_ref), do: call(parent, {:shutdown_child, child_ref}, :infinity)
 
-  @spec restart_child(GenServer.server(), Parent.child_ref()) ::
-          {:ok, Parent.stopped_children()} | :error
+  @spec restart_child(GenServer.server(), Parent.child_ref()) :: :ok | :error
   def restart_child(parent, child_ref),
     do: call(parent, {:restart_child, child_ref}, :infinity)
 
   @spec shutdown_all(GenServer.server()) :: Parent.stopped_children()
   def shutdown_all(server), do: call(server, :shutdown_all, :infinity)
 
-  @spec return_children(GenServer.server(), Parent.stopped_children()) ::
-          Parent.stopped_children()
+  @spec return_children(GenServer.server(), Parent.stopped_children()) :: :ok
   def return_children(parent, stopped_children),
     do: call(parent, {:return_children, stopped_children}, :infinity)
 

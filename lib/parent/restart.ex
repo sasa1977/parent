@@ -2,7 +2,7 @@ defmodule Parent.Restart do
   alias Parent.State
 
   # core logic of all restarts, both automatic and manual
-  def perform(state, children, opts \\ []) do
+  def perform(state, children) do
     to_start =
       children
       # reject already started children (idempotence)
@@ -11,14 +11,8 @@ defmodule Parent.Restart do
 
     {to_start, state} = record_restart(state, to_start)
 
-    {to_start, ignored} =
-      if Keyword.get(opts, :include_ephemeral?),
-        do: {to_start, []},
-        else: exclude_ignored(to_start)
-
     {not_started, state, start_error} = return_children(state, to_start)
-    {all_ignored, state} = finalize_restart(state, not_started, ignored, start_error)
-    {Parent.stopped_children(all_ignored), state}
+    finalize_restart(state, not_started, start_error)
   end
 
   defp record_restart(state, children) do
@@ -44,13 +38,6 @@ defmodule Parent.Restart do
       _ ->
         Parent.give_up!(state, :too_many_restarts, "Too many restarts in parent process.")
     end
-  end
-
-  defp exclude_ignored(to_start) do
-    Enum.split_with(
-      to_start,
-      &(&1.spec.restart != :temporary or not &1.spec.ephemeral?)
-    )
   end
 
   defp return_children(state, children, new_pids \\ %{})
@@ -128,33 +115,32 @@ defmodule Parent.Restart do
     {children_to_stop, state}
   end
 
-  defp finalize_restart(state, [], ignored, _start_error),
-    do: {ignored, state}
+  defp finalize_restart(state, [], _start_error),
+    do: state
 
-  defp finalize_restart(state, not_started, ignored, start_error) do
+  defp finalize_restart(state, not_started, start_error) do
     # stop successfully started children which are bound to non-started ones
     {extra_stopped_children, state} =
       stop_children_in_shutdown_groups(state, shutdown_groups(not_started))
 
     [failed_child | other_children] = not_started
 
-    {ignored, children_to_restart} =
-      [other_children, extra_stopped_children, ignored]
+    children_to_restart =
+      [other_children, extra_stopped_children]
       |> Stream.concat()
       |> Stream.map(&Map.put(&1, :exit_reason, :shutdown))
       |> Stream.concat([
         Map.merge(failed_child, %{exit_reason: start_error, record_restart?: true})
       ])
-      |> Enum.split_with(&(&1.spec.restart == :temporary))
 
     unless Enum.empty?(children_to_restart) do
-      # some non-temporary children have not been started -> defer auto-restart to later moment
+      # some children have not been started -> defer auto-restart to later moment
       send(
         self(),
         {Parent, :resume_restart, Parent.stopped_children(children_to_restart)}
       )
     end
 
-    {ignored, state}
+    state
   end
 end

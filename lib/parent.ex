@@ -412,13 +412,13 @@ defmodule Parent do
 
   See "Restart flow" for details on restarting procedure.
   """
-  @spec restart_child(child_ref) :: {:ok, stopped_children} | :error
+  @spec restart_child(child_ref) :: :ok | :error
   def restart_child(child_ref) do
     with {:ok, children, state} <- State.pop_child_with_bound_siblings(state(), child_ref) do
       stop_children(children, :shutdown)
-      {stopped_children, state} = Restart.perform(state, children, include_ephemeral?: true)
+      state = Restart.perform(state, children)
       store(state)
-      {:ok, stopped_children}
+      :ok
     end
   end
 
@@ -433,13 +433,11 @@ defmodule Parent do
   `shutdown_all/1`. In addition, Parent will provide this info via `handle_message/1`  when some
   children are terminated and not returned to the parent.
   """
-  @spec return_children(stopped_children) :: stopped_children
+  @spec return_children(stopped_children) :: :ok
   def return_children(stopped_children) do
-    {stopped_children, state} =
-      Restart.perform(state(), Map.values(stopped_children), include_ephemeral?: true)
-
-    store(state)
-    stopped_children
+    state()
+    |> Restart.perform(Map.values(stopped_children))
+    |> store()
   end
 
   @doc """
@@ -744,8 +742,10 @@ defmodule Parent do
     handle_child_down(state, child, :timeout)
   end
 
-  defp do_handle_message(state, {__MODULE__, :resume_restart, stopped_children}),
-    do: auto_restart(state, stopped_children)
+  defp do_handle_message(state, {__MODULE__, :resume_restart, stopped_children}) do
+    state = Restart.perform(state, Map.values(stopped_children))
+    {:ignore, state}
+  end
 
   defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
     GenServer.reply(client, supervisor_which_children())
@@ -779,14 +779,15 @@ defmodule Parent do
 
     cond do
       child.spec.restart == :permanent or (child.spec.restart == :transient and reason != :normal) ->
-        auto_restart(state, stopped_children)
+        state = Restart.perform(state, Map.values(stopped_children))
+        {:ignore, state}
 
       child.spec.ephemeral? ->
         {{:stopped_children, stopped_children}, state}
 
       true ->
         # Non-ephemeral temporary or transient child stopped and won't be restarted.
-        # We'll return all children with pid undefined.
+        # We'll keep all children with pid undefined.
 
         state =
           stopped_children
@@ -795,15 +796,6 @@ defmodule Parent do
 
         {:ignore, state}
     end
-  end
-
-  defp auto_restart(state, stopped_children) do
-    {stopped_children, state} = Restart.perform(state, Map.values(stopped_children))
-
-    if map_size(stopped_children) == 0,
-      # all children successfully returned
-      do: {:ignore, state},
-      else: {{:stopped_children, stopped_children}, state}
   end
 
   @doc false
