@@ -56,18 +56,17 @@ defmodule Parent do
 
   ## Child restart
 
-  The `:restart` option can have following values:
+  The `:restart` option controls what the parent will do if the child terminates. The following
+  values are supported:
 
     - `:permanent` - A child is automatically restarted if it stops. This is the default value.
     - `:transient` - A child is automatically restarted only if it exits abnormally.
     - `:temporary` - A child is not automatically restarted.
 
-  Note that these rules refer to the situations when a child is restarted due to its own crash.
-  If a child is bound to a dependency which is being restarted, it will also be restarted, unless
-  its marked as ephemeral. In addition, a child will always be restarted if it or its dependency
-  is explicitly restarted with `restart_child/1`.
+  If a child is taken down by the Parent because one of child's dependencies has terminated,
+  the child will be always restarted, regardless of its restart strategy and ephemeral status.
 
-  See "Bound children" and "Ephemeral children" for details.
+  See "Bound children" and "Ephemeral children" for more details.
 
   ## Maximum restart frequency
 
@@ -155,9 +154,8 @@ defmodule Parent do
   situations, the flow is the same.
 
   When a child stops, parent will take down all the siblings bound to it, and then attempt to
-  restart the child and its non-temporary siblings. This is done by starting processes
-  synchronously, one by one, in their startup order. If all processes are started successfully,
-  restart has succeeded.
+  restart the child and its siblings. This is done by starting processes synchronously, one by one,
+  in their startup order. If all processes are started successfully, restart has succeeded.
 
   If some process fails to start, the parent won't try to start younger siblings. If some of the
   successfully started children are bound to non-started siblings, they will be taken down as well.
@@ -207,24 +205,21 @@ defmodule Parent do
 
   ## Ephemeral children
 
-  By default children are not ephemeral, which means that the child will not be automatically
-  removed from the list of children in the following cases:
+  By default children are not ephemeral, which means that the parent will keep the child entry
+  in its list, even if the child is not running, which can happen in the following cases:
 
     - the child start function returns `:ignore`
     - a transient child terminates normally
     - a temporary child terminates
 
-  In all these cases, the child will remain in the list of children, with it's pid set to
-  `:undefined`. Such child might even be automatically restarted if its dependency is restarted.
+  Functions such as `children/0` will include non-running children, with their pid set to
+  `:undefined`. You can remove the children from the list by invoking `shutdown_child/1`, or
+  restart them with `restart_child/1`.
 
   This behaviour is typically desired for "static" supervisors where the list of children is
   predefined and finite. However, when you're adding children dynamically, you typically want the
-  child to be "forgotten" after it stops (or if it decides not to start by returning `:ignore`).
-  In such cases you can mark the child as ephemeral by including `ephemeral?: true` option in the
-  child specification.
-
-  An ephemeral child will be removed from the child list when it stops. It also won't be restarted
-  if its dependency is restarted.
+  child to be "forgotten" when it is not running. In such cases you can mark the child as ephemeral
+  by including `ephemeral?: true` option in the child specification.
 
   ## Building custom parent processes
 
@@ -311,7 +306,7 @@ defmodule Parent do
 
   @type start_spec :: child_spec | module | {module, term}
 
-  @type child :: %{id: child_id, pid: pid, meta: child_meta}
+  @type child :: %{id: child_id, pid: pid | :undefined, meta: child_meta}
 
   @type handle_message_response ::
           {:stopped_children, stopped_children}
@@ -320,7 +315,7 @@ defmodule Parent do
   @type stopped_children :: %{
           child_id => %{
             optional(atom) => any,
-            pid: pid,
+            pid: pid | :undefined,
             meta: child_meta,
             exit_reason: term
           }
@@ -401,14 +396,7 @@ defmodule Parent do
   end
 
   @doc """
-  Restarts the child.
-
-  This function will also restart all siblings which are bound to this child, including
-  ephemeral children.
-
-  The function might partially succeed if some non-temporary children fail to start. In this case
-  the resulting `stopped_children` map will contain the corresponding entries. You can pass this
-  map to `return_children/2` to manually return such children to the parent.
+  Restarts the child and its siblings.
 
   See "Restart flow" for details on restarting procedure.
   """
@@ -426,12 +414,11 @@ defmodule Parent do
   Starts new instances of stopped children.
 
   This function can be invoked to return stopped children back to the parent. Essentially, this
-  function behaves almost the same as automatic restart, with a difference that temporary children
-  are by default also returned.
+  function works the same as automatic restarts.
 
   The `stopped_children` information is obtained via functions such as `shutdown_child/1` or
-  `shutdown_all/1`. In addition, Parent will provide this info via `handle_message/1`  when some
-  children are terminated and not returned to the parent.
+  `shutdown_all/1`. In addition, Parent will provide this info via `handle_message/1` if an
+  ephemeral child stops and is not restarted.
   """
   @spec return_children(stopped_children) :: :ok
   def return_children(stopped_children) do
@@ -441,13 +428,14 @@ defmodule Parent do
   end
 
   @doc """
-  Terminates the child.
+  Shuts down the child and all siblings depending on it, and removes them from the parent state.
 
   This function will also shut down all siblings directly and transitively bound to the given child.
   The function will wait for the child to terminate, and pull the `:EXIT` message from the mailbox.
 
-  Permanent and transient children won't be restarted, and their specifications won't be preserved.
-  In other words, this function completely removes the child and all other children bound to it.
+  All terminated children are removed from the parent state. The `stopped_children` structure
+  describes all of these children, and can be used with `return_children/1` to manually restart
+  these processes.
   """
   @spec shutdown_child(child_ref) :: {:ok, stopped_children} | :error
   def shutdown_child(child_ref) do
@@ -461,8 +449,8 @@ defmodule Parent do
   @doc """
   Terminates all running child processes.
 
-  Children are terminated synchronously, in the reverse order from the order they
-  have been started in. All corresponding `:EXIT` messages will be pulled from the mailbox.
+  Children are terminated synchronously, in the reverse order from the order they have been started
+  in. All corresponding `:EXIT` messages will be pulled from the mailbox.
   """
   @spec shutdown_all(term) :: stopped_children
   def shutdown_all(reason \\ :shutdown) do
@@ -482,8 +470,9 @@ defmodule Parent do
   `handle_info` of the callback module).
 
   If `:ignore` is returned, the message has been processed, and the client code should ignore it.
-  Finally, if the return value is `{:stopped_children, info}`, it indicates that a child process
-  has terminated. A client may do some extra processing in this case.
+  Finally, if the return value is `{:stopped_children, info}`, it indicates that some ephemeral
+  processes have stopped and have been removed from parent. A client may do some extra processing
+  in this case.
 
   Note that you don't need to invoke this function in a `Parent.GenServer` callback module.
   """
@@ -512,9 +501,9 @@ defmodule Parent do
   @doc """
   Returns true if the child process is still running, false otherwise.
 
-  Note that this function might return true even if the child has terminated.
-  This can happen if the corresponding `:EXIT` message still hasn't been
-  processed.
+  Note that this function might return true even if the child has terminated. This can happen if
+  the corresponding `:EXIT` message still hasn't been processed, and also if a non-ephemeral
+  child is not running.
   """
   @spec child?(child_ref) :: boolean
   def child?(child_ref), do: match?({:ok, _}, State.child(state(), child_ref))
@@ -578,7 +567,7 @@ defmodule Parent do
     end
   end
 
-  @doc "Returns the count of running child processes."
+  @doc "Returns the count of children."
   @spec num_children() :: non_neg_integer
   def num_children(), do: State.num_children(state())
 
