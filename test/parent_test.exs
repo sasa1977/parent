@@ -92,6 +92,34 @@ defmodule ParentTest do
       assert {:ok, _pid} = start_child(binds_to: ~w/child1 child2/a)
     end
 
+    test "starts a child if it depends on non-running process" do
+      Parent.initialize()
+      start_child!(id: :child1, start: fn -> :ignore end)
+      assert {:ok, _} = start_child(id: :child2, binds_to: [:child1])
+    end
+
+    test "keeps ignored non-ephemeral children in the state" do
+      Parent.initialize()
+
+      assert start_child(id: :child1, start: fn -> :ignore end, ephemeral?: false) ==
+               {:ok, :undefined}
+
+      assert start_child(id: :child2, start: fn -> :ignore end, ephemeral?: false) ==
+               {:ok, :undefined}
+
+      assert Parent.child_pid(:child1) == {:ok, :undefined}
+      assert Parent.child_pid(:child2) == {:ok, :undefined}
+    end
+
+    test "doesn't keep ephemeral child in the state" do
+      Parent.initialize()
+
+      assert start_child(id: :child, start: fn -> :ignore end, ephemeral?: true) ==
+               {:ok, :undefined}
+
+      assert Parent.child_pid(:child) == :error
+    end
+
     test "handles error by the started process" do
       Parent.initialize()
       assert start_child(start: fn -> {:error, :some_reason} end) == {:error, :some_reason}
@@ -262,6 +290,16 @@ defmodule ParentTest do
       assert_receive {:DOWN, _mref, :process, ^child, :killed}
     end
 
+    test "can stop a non-running child" do
+      Parent.initialize()
+
+      start_child!(id: :child1, start: fn -> :ignore end)
+      start_child!(id: :child2, start: fn -> :ignore end)
+
+      assert {:ok, %{child1: %{pid: :undefined}}} = Parent.shutdown_child(:child1)
+      assert [%{id: :child2}] = Parent.children()
+    end
+
     test "fails if an unknown child is given" do
       Parent.initialize()
       assert Parent.shutdown_child(:child) == :error
@@ -307,6 +345,15 @@ defmodule ParentTest do
       assert [%{pid: ^child6}] = Parent.children()
     end
 
+    test "stops a non-running dependency" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      start_child!(id: :child2, start: fn -> :ignore end, binds_to: [:child1])
+
+      assert {:ok, %{child2: %{pid: :undefined}}} = Parent.shutdown_child(:child1)
+      assert Parent.children() == []
+    end
+
     test "fails if the parent is not initialized" do
       assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.shutdown_child(1) end
     end
@@ -327,6 +374,18 @@ defmodule ParentTest do
       assert Parent.restart_child(child) == :ok
       assert [%{id: :child}] = Parent.children()
       refute child_pid!(:child) == child
+    end
+
+    test "can restart a non-running child" do
+      Parent.initialize()
+      start_child!(id: :child, start: fn -> :ignore end)
+
+      assert Parent.restart_child(:child) == :ok
+      assert [%{id: :child}] = Parent.children()
+
+      # trying once more to verify that a child is successfully reregistered
+      assert Parent.restart_child(:child) == :ok
+      assert [%{id: :child}] = Parent.children()
     end
 
     test "preserves startup order" do
@@ -807,20 +866,17 @@ defmodule ParentTest do
   describe "handle_message/1" do
     test "handles child termination" do
       Parent.initialize()
-      child = start_child!(id: :child, meta: :meta, restart: :temporary, ephemeral?: true)
-      GenServer.stop(child)
+      child1 = start_child!(id: :child1, meta: :meta, restart: :temporary, ephemeral?: false)
+      child2 = start_child!(id: :child2, meta: :meta, restart: :temporary, ephemeral?: true)
 
-      assert {:stopped_children, info} = handle_parent_message()
+      GenServer.stop(child1)
+      assert handle_parent_message() == :ignore
+      assert Parent.child?(:child1)
+      assert child_pid!(:child1) == :undefined
 
-      assert [{:child, info}] = Map.to_list(info)
-      assert info.pid == child
-      assert info.exit_reason == :normal
-      assert info.meta == :meta
-
-      assert Parent.num_children() == 0
-      assert Parent.children() == []
-      assert Parent.child_id(child) == :error
-      assert Parent.child_pid(:child) == :error
+      GenServer.stop(child2)
+      assert {:stopped_children, %{child2: _}} = handle_parent_message()
+      refute Parent.child?(:child2)
     end
 
     test "terminates dependencies if a child stops" do
@@ -1023,127 +1079,6 @@ defmodule ParentTest do
 
       Parent.shutdown_child(hd(Parent.children()).pid)
       assert [%{pid: ^child6}] = Parent.children()
-    end
-  end
-
-  describe "ignored child" do
-    test "is represented with the `:undefined` pid" do
-      Parent.initialize()
-      assert start_child(id: :child1, start: fn -> :ignore end) == {:ok, :undefined}
-      assert start_child(id: :child2, start: fn -> :ignore end) == {:ok, :undefined}
-
-      assert [%{id: :child1, pid: :undefined}, %{id: :child2, pid: :undefined}] =
-               Parent.children()
-
-      assert Parent.child_pid(:child1) == {:ok, :undefined}
-      assert Parent.child_pid(:child2) == {:ok, :undefined}
-    end
-
-    test "is not stored when child is dynamic" do
-      Parent.initialize()
-
-      assert start_child(id: :child1, start: fn -> :ignore end, ephemeral?: true) ==
-               {:ok, :undefined}
-
-      start_child!(id: :child2, start: fn -> :ignore end)
-
-      assert [%{id: :child2, pid: :undefined}] = Parent.children()
-    end
-
-    test "can be stopped" do
-      Parent.initialize()
-      start_child!(id: :child1, start: fn -> :ignore end)
-      start_child!(id: :child2, start: fn -> :ignore end)
-
-      assert {:ok, %{child1: %{pid: :undefined}}} = Parent.shutdown_child(:child1)
-      assert [%{id: :child2}] = Parent.children()
-    end
-
-    test "can be restarted" do
-      Parent.initialize()
-      start_child!(id: :child, start: fn -> :ignore end)
-
-      assert Parent.restart_child(:child) == :ok
-      assert [%{id: :child}] = Parent.children()
-
-      # trying once more to verify that a child is successfully reregistered
-      assert Parent.restart_child(:child) == :ok
-      assert [%{id: :child}] = Parent.children()
-    end
-
-    test "is stopped together with its dependency" do
-      Parent.initialize()
-      start_child!(id: :child1)
-      start_child!(id: :child2, start: fn -> :ignore end, binds_to: [:child1])
-
-      {:ok, stopped_children} = Parent.shutdown_child(:child1)
-      assert %{child2: %{pid: :undefined}} = stopped_children
-
-      assert Parent.children() == []
-    end
-
-    test "can be a dependency" do
-      Parent.initialize()
-
-      start_child!(id: :child1, start: fn -> :ignore end)
-      start_child!(id: :child2, binds_to: [:child1])
-
-      {:ok, stopped_children} = Parent.shutdown_child(:child1)
-      assert Parent.children() == []
-
-      assert Parent.return_children(stopped_children) == :ok
-      assert Enum.map(Parent.children(), & &1.id) == [:child1, :child2]
-    end
-
-    test "can be in the shutdown group with other children" do
-      Parent.initialize()
-
-      start_child!(id: :child1, start: fn -> :ignore end, shutdown_group: :group1)
-      start_child!(id: :child2, shutdown_group: :group1)
-
-      {:ok, stopped_children} = Parent.shutdown_child(:child1)
-      assert Parent.children() == []
-
-      Parent.return_children(stopped_children)
-      {:ok, _} = Parent.shutdown_child(:child2)
-      assert Parent.children() == []
-    end
-  end
-
-  describe "ephemeral child" do
-    test "is removed when it stops and isn't restarted" do
-      Parent.initialize()
-      start_child!(id: :child1, ephemeral?: true, start: fn -> :ignore end)
-
-      start_child!(
-        id: :child2,
-        ephemeral?: true,
-        restart: :transient,
-        start: {Task, :start_link, [fn -> :ok end]}
-      )
-
-      start_child!(
-        id: :child3,
-        ephemeral?: true,
-        restart: :temporary,
-        start: {Task, :start_link, [fn -> :ok end]}
-      )
-
-      assert {:stopped_children, _} = handle_parent_message()
-      assert {:stopped_children, _} = handle_parent_message()
-
-      assert Parent.children() == []
-    end
-
-    test "is restarted if its dependency is restarted" do
-      Parent.initialize()
-      start_child!(id: :child1)
-
-      child2 =
-        start_child!(id: :child2, ephemeral?: true, restart: :temporary, binds_to: [:child1])
-
-      provoke_child_termination!(:child1, at: 0)
-      assert child_pid!(:child2) != child2
     end
   end
 
