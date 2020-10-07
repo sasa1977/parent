@@ -1,3 +1,25 @@
+# 0.11.0-rc.1
+
+When restarting a child, parent will unconditionally restart all the siblings bound to it (directly or transitively), irrespective of their restart strategy.
+
+This version introduces the concept of ephemeral children, through the `:ephemeral?` flag in child specification. This flag controls how a parent manages non-running children, which is a state a child can enter if the child's start function returns `:ignore`, if a transient child terminates normally, or if a temporary child terminates.
+
+If a child is not ephemeral (default), the parent will still keep the child in its internal state, and the non-running child will appear in the result of functions such as `Parent.children/0` with its pid set to `:undefined`. This mimics the behaviour of "static" (one_for_one, one_for_all, rest_for_one) supervisors.
+
+If a child is ephemeral (`ephemeral?: true`), the parent will remove the child from its state when the child is not running. This mimics the behaviour of `DynamicSupervisor`.
+
+## Breaking changes
+
+- Temporary, transient, and non-running children are restarted if the process they depend on is being restarted by the parent.
+- Non-running children will by default remain in the parent's state. If you use parent to dynamically start temporary children, you should make your children ephemeral by including `ephemeral?: true` in the childspec.
+- `Parent.GenServer.handle_stopped_children` is not invoked for non-ephemeral children. If you rely on this callback, you need to make the children ephemeral.
+
+## Additions
+
+- Support for ephemeral children, which allows a per-child control of static/dynamic supervision behaviour.
+
+To change this, set the child as ephemeral
+
 # 0.11.0-rc.0
 
 This version adds the remaining of the `Supervisor` behaviour to `Parent`, such as automatic child restarts, self-termination when maximum restart intensity is exceeded, and binding lifecycles of children. The new high-level module `Parent.Supervisor` provides the highest-level interface, roughly comparable to a callbackless `Supervisor`. However, all of the parenting features are available in lower level modules, `Parent.GenServer` (which is similar to a callback-based `Supervisor` + `GenServer`) and `Parent` (which can be thought of as a toolkit for building custom parent behaviours and processes). The new module `Parent.Client` can be used to interact with any parent process from the outside (i.e. from other processes).

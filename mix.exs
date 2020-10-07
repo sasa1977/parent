@@ -1,7 +1,7 @@
 defmodule Parent.MixProject do
   use Mix.Project
 
-  @version "0.11.0-rc.0"
+  @version "0.11.0-rc.1"
 
   def project do
     [
