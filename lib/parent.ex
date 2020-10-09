@@ -770,7 +770,17 @@ defmodule Parent do
   end
 
   @doc false
-  def stopped_children(children),
+  def enqueue_resume_restart(children_to_restart) do
+    unless Enum.empty?(children_to_restart) do
+      # some children have not been started -> defer auto-restart to later moment
+      send(
+        self(),
+        {Parent, :resume_restart, stopped_children(children_to_restart)}
+      )
+    end
+  end
+
+  defp stopped_children(children),
     do: Enum.into(children, %{}, &{with(nil <- &1.spec.id, do: &1.pid), &1})
 
   @doc false

@@ -12,7 +12,10 @@ defmodule Parent.Restart do
     {to_start, state} = record_restart(state, to_start)
 
     {not_started, state, start_error} = return_children(state, to_start)
-    finalize_restart(state, not_started, start_error)
+
+    if not_started == [],
+      do: state,
+      else: enqueue_resume_restart(state, not_started, start_error)
   end
 
   defp record_restart(state, children) do
@@ -115,31 +118,18 @@ defmodule Parent.Restart do
     {children_to_stop, state}
   end
 
-  defp finalize_restart(state, [], _start_error),
-    do: state
-
-  defp finalize_restart(state, not_started, start_error) do
+  defp enqueue_resume_restart(state, not_started, start_error) do
     # stop successfully started children which are bound to non-started ones
     {extra_stopped_children, state} =
       stop_children_in_shutdown_groups(state, shutdown_groups(not_started))
 
     [failed_child | other_children] = not_started
 
-    children_to_restart =
-      [other_children, extra_stopped_children]
-      |> Stream.concat()
-      |> Stream.map(&Map.put(&1, :exit_reason, :shutdown))
-      |> Stream.concat([
-        Map.merge(failed_child, %{exit_reason: start_error, record_restart?: true})
-      ])
-
-    unless Enum.empty?(children_to_restart) do
-      # some children have not been started -> defer auto-restart to later moment
-      send(
-        self(),
-        {Parent, :resume_restart, Parent.stopped_children(children_to_restart)}
-      )
-    end
+    [other_children, extra_stopped_children]
+    |> Stream.concat()
+    |> Stream.map(&Map.put(&1, :exit_reason, :shutdown))
+    |> Stream.concat([Map.merge(failed_child, %{exit_reason: start_error, record_restart?: true})])
+    |> Parent.enqueue_resume_restart()
 
     state
   end
