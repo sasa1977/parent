@@ -54,30 +54,6 @@ defmodule Parent do
 
   To modify a child specification, `Parent.child_spec/2` can be used.
 
-  ## Child restart
-
-  The `:restart` option controls what the parent will do if the child terminates. The following
-  values are supported:
-
-    - `:permanent` - A child is automatically restarted if it stops. This is the default value.
-    - `:transient` - A child is automatically restarted only if it exits abnormally.
-    - `:temporary` - A child is not automatically restarted.
-
-  If a child is taken down by the Parent because one of child's dependencies has terminated,
-  the child will be always restarted, regardless of its restart strategy and ephemeral status.
-
-  See "Bound children" and "Ephemeral children" for more details.
-
-  ## Maximum restart frequency
-
-  Similarly to `Supervisor`, a parent process keeps track of the amount of restarts, and
-  self-terminates if maximum threshold (defaults to 3 restarts in 5 seconds) is exceeded.
-
-  In addition, you can provide child specific thresholds by including `:max_restarts` and
-  `:max_seconds` options in child specification. Finally, note that `:max_restarts` can be set to
-  `:infinity` (both for the parent and each child). This can be useful if you want to disable the
-  parent global limit, and use child-specific limits.
-
   ## Bound children
 
   You can bind the lifecycle of each child to the lifecycles of its older siblings. This is roughly
@@ -104,11 +80,6 @@ defmodule Parent do
   It's worth noting that bindings are transitive. If a child A is bound to the child B, which is
   in turns bound to child C, then child A also depends on child C. If child C stops, B and A will
   be stopped to.
-
-  Finally, because of binding semantics (see Lifecycle dependency consequences), a child can only
-  be bound to a sibling with the same or stronger restart option, where restart strengths can
-  be defined as permanent > transient > temporary. So for example, a permanent child
-  can't be bound to a temporary child.
 
   ## Shutdown groups
 
@@ -146,16 +117,57 @@ defmodule Parent do
   since things are taking place concurrently, such state might briefly exists until parent
   is able to shutdown all bound processes.
 
+  ## Handling child termination
+
+  When a child terminates, depending on its `:restart` and `:ephemeral` settings, parent will do
+  one of the following things:
+
+    - restart the child (possibly giving up if restart limit has been exceeded)
+    - set the child's pid to `:undefined`
+    - remove the child from its internal structures
+
+  This decision will be based on two child settings: `:restart` and `:ephemeral`.
+
+  The `:restart` option controls when a child will be automatically restarted by its parent:
+
+    - `:permanent` - A child is automatically restarted if it stops. This is the default value.
+    - `:transient` - A child is automatically restarted only if it exits abnormally.
+    - `:temporary` - A child is not automatically restarted.
+
+  The `:ephemeral` option controls what to do when a child is not-running and will not be
+  restarted. This typically happens when a transient child stops normally, or when a temporary
+  child stops, but it can also happen is the child's start function returns `:ignore`.
+
+  If the child is not marked as ephemeral (default), parent will keep the child in its internal
+  structures, setting its pid to `:undefined`. Functions such as `Parent.children/0` will return
+  such child in the result, and such child can be restarted using `Parent.restart_child/1`. This
+  mimics the behaviour of "static supervisors" (i.e. one_for_one, rest_for_one, one_for_all).
+
+  If the child is marked as ephemeral, parent will remove the child from its internal structures.
+  This mimics the behaviour of `DynamicSupervisor`.
+
+  In all of these cases, parent will perform the same action on bound siblings, ignoring their
+  `:restart` and `:ephemeral` settings. For example, if a permanent child is restarted, parent
+  will restart all of its bound siblings (including the temporary ones). Likewise, if a temporary
+  child stops, parent will stop all of its bound siblings, including the permanent ones. If an
+  ephemeral child stops, parent will remove all of its bound siblings, including the non-ephemeral
+  ones.
+
+  If a child is not restarted, its ephemeral bound siblings will be removed. This is the only case
+  where parent honors the `:ephemeral` status of the sibling.
+
   ## Restart flow
 
-  Process restarts happen automatically, if a permanent child stops or if a transient child
-  crashes. They can also happen manually, when you invoke `restart_child/1` or if you're manually
-  returning terminated non-restarted children with the function `return_children/2`. In all these
-  situations, the flow is the same.
+  Process restarts can be triggered by the following situations:
 
-  When a child stops, parent will take down all the siblings bound to it, and then attempt to
-  restart the child and its siblings. This is done by starting processes synchronously, one by one,
-  in their startup order. If all processes are started successfully, restart has succeeded.
+    - a child terminated and it will be restarted due to its `:restart` setting
+    - `restart_child/1` has been invoked (manual restart)
+    - `return_children/2` has been invoked (returning removed children)
+
+  In all these situations, the flow is the same. Parent will first synchronously stop the bound
+  dependencies of the child (in the reverse startup order). Then it will attempt to restart the
+  child and its siblings. This is done by starting processes synchronously, one by one, in the
+  startup order. If all processes are started successfully, restart has succeeded.
 
   If some process fails to start, the parent won't try to start younger siblings. If some of the
   successfully started children are bound to non-started siblings, they will be taken down as well.
@@ -169,11 +181,20 @@ defmodule Parent do
   the restart intensity. Thus, if a child repeatedly fails to restart, the parent will give up at
   some point, according to restart intensity settings.
 
-  When the children are restarted, they will be started in the original startup order. The
-  restarted children keep their original startup order with respect to non-restarted children. For
-  example, suppose that four children are running: A, B, C, and D, and children B and D are
+  The restarted children keep their original startup order with respect to non-restarted children.
+  For example, suppose that four children are running: A, B, C, and D, and children B and D are
   restarted. If the parent process then stops, it will take the children down in the order D, C, B,
   and A.
+
+  ### Maximum restart frequency
+
+  Similarly to `Supervisor`, a parent process keeps track of the amount of restarts, and
+  self-terminates if maximum threshold (defaults to 3 restarts in 5 seconds) is exceeded.
+
+  In addition, you can provide child specific thresholds by including `:max_restarts` and
+  `:max_seconds` options in child specification. Finally, note that `:max_restarts` can be set to
+  `:infinity` (both for the parent and each child). This can be useful if you want to disable the
+  parent global limit, and use child-specific limits.
 
   Finally, it's worth noting that if termination of one child causes the restart of multiple
   children, parent will treat this as a single restart event when calculating the restart frequency
@@ -202,24 +223,6 @@ defmodule Parent do
   information by providing the `:meta` field in the child specification, update it through
   functions such as `update_child_meta/2` or `Parent.Client.update_child_meta/3`, and query it
   through `Parent.Client.child_meta/2`.
-
-  ## Ephemeral children
-
-  By default children are not ephemeral, which means that the parent will keep the child entry
-  in its list, even if the child is not running, which can happen in the following cases:
-
-    - the child start function returns `:ignore`
-    - a transient child terminates normally
-    - a temporary child terminates
-
-  Functions such as `children/0` will include non-running children, with their pid set to
-  `:undefined`. You can remove the children from the list by invoking `shutdown_child/1`, or
-  restart them with `restart_child/1`.
-
-  This behaviour is typically desired for "static" supervisors where the list of children is
-  predefined and finite. However, when you're adding children dynamically, you typically want the
-  child to be "forgotten" when it is not running. In such cases you can mark the child as ephemeral
-  by including `ephemeral?: true` option in the child specification.
 
   ## Building custom parent processes
 
@@ -325,7 +328,6 @@ defmodule Parent do
   @type start_error ::
           :invalid_child_id
           | {:missing_deps, [child_ref]}
-          | {:forbidden_bindings, from: child_id | nil, to: [child_ref]}
           | {:non_uniform_shutdown_group, [shutdown_group]}
 
   @spec child_spec(start_spec, Keyword.t() | child_spec) :: child_spec
@@ -654,7 +656,6 @@ defmodule Parent do
     with :ok <- check_id_type(child_spec.id),
          :ok <- check_id_uniqueness(state, child_spec.id),
          :ok <- check_missing_deps(state, child_spec),
-         :ok <- check_valid_bindings(state, child_spec),
          do: check_valid_shutdown_group(state, child_spec)
   end
 
@@ -675,27 +676,6 @@ defmodule Parent do
     end
   end
 
-  defp check_valid_bindings(state, %{restart: from} = child_spec) do
-    child_spec.binds_to
-    |> Enum.map(&State.child!(state, &1))
-    |> Enum.reject(fn %{spec: %{restart: to}} ->
-      # Valid bindings:
-      #
-      # 1. A child can bind to a dep with the same restart strategy
-      # 2. Transient child can bind to a permanent child
-      # 3. Temporary child can bind to everyone
-
-      from == to or
-        (from == :transient and to == :permanent) or
-        from == :temporary
-    end)
-    |> Enum.map(&with nil <- &1.spec.id, do: &1.spec.pid)
-    |> case do
-      [] -> :ok
-      deps -> {:error, {:forbidden_bindings, from: child_spec.id, to: deps}}
-    end
-  end
-
   defp check_valid_shutdown_group(_state, %{shutdown_group: nil}), do: :ok
 
   defp check_valid_shutdown_group(state, child_spec) do
@@ -703,8 +683,8 @@ defmodule Parent do
     |> State.children_in_shutdown_group(child_spec.shutdown_group)
     |> Stream.map(& &1.spec)
     |> Stream.concat([child_spec])
-    |> Stream.map(& &1.restart)
-    |> Enum.uniq()
+    |> Stream.uniq_by(&{&1.restart, &1.ephemeral?})
+    |> Enum.take(2)
     |> case do
       [_] -> :ok
       [_ | _] -> {:error, {:non_uniform_shutdown_group, child_spec.shutdown_group}}
@@ -764,26 +744,28 @@ defmodule Parent do
       |> Enum.map(&Map.put(&1, :exit_reason, :shutdown))
 
     stop_children(bound_siblings, :shutdown)
-    stopped_children = stopped_children([child | bound_siblings])
 
     cond do
       child.spec.restart == :permanent or (child.spec.restart == :transient and reason != :normal) ->
-        state = Restart.perform(state, Map.values(stopped_children))
+        state = Restart.perform(state, [child | bound_siblings])
         {:ignore, state}
 
       child.spec.ephemeral? ->
-        {{:stopped_children, stopped_children}, state}
+        {{:stopped_children, stopped_children([child | bound_siblings])}, state}
 
       true ->
         # Non-ephemeral temporary or transient child stopped and won't be restarted.
-        # We'll keep all children with pid undefined.
+        # We'll keep all non-ephemeral children with pid undefined.
+
+        {ephemeral, non_ephemeral} =
+          Enum.split_with([child | bound_siblings], & &1.spec.ephemeral?)
 
         state =
-          stopped_children
-          |> Map.values()
-          |> Enum.reduce(state, &State.reregister_child(&2, &1, :undefined, nil))
+          Enum.reduce(non_ephemeral, state, &State.reregister_child(&2, &1, :undefined, nil))
 
-        {:ignore, state}
+        if ephemeral == [],
+          do: {:ignore, state},
+          else: {{:stopped_children, stopped_children(ephemeral)}, state}
     end
   end
 

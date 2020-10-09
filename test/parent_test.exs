@@ -145,21 +145,7 @@ defmodule ParentTest do
       assert error == {:missing_deps, ~w/child4 child5/a}
     end
 
-    for {from, tos} <- [
-          permanent: ~w/transient temporary/a,
-          transient: ~w/temporary/a
-        ],
-        to <- tos do
-      test "fails on forbidden dependency from #{from} to #{to}" do
-        Parent.initialize()
-        start_child!(id: :child1, restart: unquote(to))
-
-        assert {:error, {:forbidden_bindings, [from: :child2, to: [:child1]]}} =
-                 start_child(id: :child2, restart: unquote(from), binds_to: [:child1])
-      end
-    end
-
-    test "exits when children in a shutdown group don't have the same restart type" do
+    test "fails when children in a shutdown group don't have the same restart type" do
       Parent.initialize()
 
       for r1 <- ~w/temporary transient temporary/a,
@@ -171,6 +157,15 @@ defmodule ParentTest do
         assert start_child(id: :child2, restart: r2, shutdown_group: :group) ==
                  {:error, {:non_uniform_shutdown_group, :group}}
       end
+    end
+
+    test "fails when children in a shutdown group don't have the same ephemeral setting" do
+      Parent.initialize()
+
+      start_child!(id: :child1, ephemeral?: false, shutdown_group: :group)
+
+      assert start_child(id: :child2, ephemeral?: true, shutdown_group: :group) ==
+               {:error, {:non_uniform_shutdown_group, :group}}
     end
 
     test "fails if the parent is not initialized" do
@@ -399,115 +394,6 @@ defmodule ParentTest do
       assert Enum.map(Parent.children(), & &1.pid) == [child1, child2, child3]
     end
 
-    test "restarts all bound siblings" do
-      Parent.initialize()
-
-      child1 = start_child!(id: :child1, shutdown_group: :group1)
-      child2 = start_child!(id: :child2, binds_to: [:child1])
-
-      child3 =
-        start_child!(id: :child3, restart: :temporary, ephemeral?: true, binds_to: [:child2])
-
-      child4 = start_child!(id: :child4, shutdown_group: :group1)
-      child5 = start_child!(id: :child5, restart: :transient, binds_to: [:child2])
-      child6 = start_child!(id: :child6)
-
-      assert Parent.restart_child(:child4) == :ok
-
-      refute child_pid!(:child1) == child1
-      refute child_pid!(:child2) == child2
-      refute child_pid!(:child3) == child3
-      refute child_pid!(:child4) == child4
-      refute child_pid!(:child5) == child5
-      assert child_pid!(:child6) == child6
-    end
-
-    test "fails if the parent is not initialized" do
-      assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.restart_child(1) end
-    end
-  end
-
-  describe "automatic child restart" do
-    test "is performed when a permanent child terminates" do
-      Parent.initialize()
-      pid1 = start_child!(id: :child, meta: :meta)
-      provoke_child_restart!(:child, restart: :shutdown)
-      refute child_pid!(:child) == pid1
-    end
-
-    test "is performed when a transient child terminates abnormally" do
-      Parent.initialize()
-      start_child!(id: :child, restart: :transient)
-      provoke_child_restart!(:child)
-      assert Parent.child?(:child)
-    end
-
-    test "is performed when a child is terminated due to a timeout" do
-      Parent.initialize()
-      start_child!(id: :child, timeout: 0)
-      :ignore = handle_parent_message()
-      assert Parent.child?(:child)
-    end
-
-    test "is performed when :restart option is not provided" do
-      Parent.initialize()
-      start_child!(id: :child)
-      provoke_child_restart!(:child)
-      assert Parent.child?(:child)
-    end
-
-    test "is not performed when a temporary child terminates" do
-      Parent.initialize()
-      child = start_child!(id: :child, restart: :temporary)
-      Process.exit(child, :kill)
-
-      refute match?({:child_restarted, _restart_info}, handle_parent_message())
-      assert Parent.child_pid(:child) == {:ok, :undefined}
-    end
-
-    test "is not performed when a child is terminated via `Parent` function" do
-      Parent.initialize()
-      start_child!(id: :child)
-      Parent.shutdown_child(:child)
-
-      refute_receive _
-      refute Parent.child?(:child)
-    end
-
-    test "preserves startup order" do
-      Parent.initialize()
-      start_child!(id: :child1)
-      start_child!(id: :child2)
-      start_child!(id: :child3)
-      provoke_child_restart!(:child2)
-      assert Enum.map(Parent.children(), & &1.id) == [:child1, :child2, :child3]
-    end
-
-    test "gradually retries child restart if the child fails to start" do
-      Parent.initialize()
-
-      child1 = start_child!(id: :child1)
-      start_child!(id: :child2, binds_to: [:child1])
-
-      raise_on_child_start(:child1)
-      Process.exit(child1, :kill)
-
-      assert handle_parent_message() == :ignore
-      assert Parent.children() == []
-      assert_receive {:EXIT, pid, _}
-
-      succeed_on_child_start(:child1)
-      raise_on_child_start(:child2)
-
-      assert handle_parent_message() == :ignore
-      assert [%{id: :child1}] = Parent.children()
-      assert_receive {:EXIT, pid, _}
-
-      succeed_on_child_start(:child2)
-      assert handle_parent_message() == :ignore
-      assert [%{id: :child1}, %{id: :child2}] = Parent.children()
-    end
-
     test "also restarts all bound siblings" do
       Parent.initialize()
 
@@ -525,7 +411,7 @@ defmodule ParentTest do
 
       child8 = start_child!(id: :child8)
 
-      assert provoke_child_restart!(:child4) == :ignore
+      assert Parent.restart_child(:child4) == :ok
 
       refute child_pid!(:child1) == child1
       refute child_pid!(:child2) == child2
@@ -537,47 +423,153 @@ defmodule ParentTest do
       assert child_pid!(:child8) == child8
     end
 
-    test "takes down the entire parent on too many global restarts" do
-      Parent.initialize(max_restarts: 2)
+    test "gradually retries child restart if the child fails to start" do
+      Parent.initialize()
 
       start_child!(id: :child1)
-      start_child!(id: :child2)
-      start_child!(id: :child3)
+      start_child!(id: :child2, binds_to: [:child1])
 
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child2)
+      raise_on_child_start(:child1)
+      Parent.restart_child(:child1)
 
-      log = assert_parent_exit(fn -> provoke_child_restart!(:child3) end, :too_many_restarts)
-      assert log =~ "[error] Too many restarts in parent process"
+      assert Parent.children() == []
+      assert_receive {:EXIT, pid, _}
+
+      succeed_on_child_start(:child1)
+      raise_on_child_start(:child2)
+
+      assert handle_parent_message() == :ignore
+      assert [%{id: :child1}] = Parent.children()
+      assert_receive {:EXIT, pid, _}
+
+      succeed_on_child_start(:child2)
+      assert handle_parent_message() == :ignore
+      assert [%{id: :child1}, %{id: :child2}] = Parent.children()
+    end
+
+    test "fails if the parent is not initialized" do
+      assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.restart_child(1) end
+    end
+  end
+
+  describe "child termination" do
+    test "by default causes restart" do
+      Parent.initialize()
+      start_child!(id: :child)
+      provoke_child_termination!(:child)
+      assert Parent.child?(:child)
+    end
+
+    test "causes restart if a permanent child stops" do
+      Parent.initialize()
+      pid1 = start_child!(id: :child, meta: :meta, restart: :permanent)
+      provoke_child_termination!(:child, restart: :shutdown)
+      assert is_pid(child_pid!(:child))
+      refute child_pid!(:child) == pid1
+    end
+
+    test "causes restart when a transient child terminates abnormally" do
+      Parent.initialize()
+      start_child!(id: :child, restart: :transient)
+      provoke_child_termination!(:child)
+      assert Parent.child?(:child)
+    end
+
+    test "causes restart when a child is terminated due to a timeout" do
+      Parent.initialize()
+      start_child!(id: :child, timeout: 0)
+      :ignore = handle_parent_message()
+      assert Parent.child?(:child)
+    end
+
+    test "doesn't cause restart if a temporary child terminates" do
+      Parent.initialize()
+      start_child!(id: :child, restart: :temporary)
+      provoke_child_termination!(:child)
+      assert Parent.child_pid(:child) == {:ok, :undefined}
+    end
+
+    test "doesn't cause restart if a transient child terminates normally" do
+      Parent.initialize()
+      start_child!(id: :child, restart: :transient, start: {Task, :start_link, [fn -> :ok end]})
+      :ignore = handle_parent_message()
+      assert Parent.child_pid(:child) == {:ok, :undefined}
+    end
+
+    test "doesn't cause restart when a child is terminated via `Parent` function" do
+      Parent.initialize()
+      start_child!(id: :child)
+      Parent.shutdown_child(:child)
+
+      refute_receive _
+      refute Parent.child?(:child)
+    end
+
+    test "also restarts temporary bound siblings" do
+      Parent.initialize()
+      start_child!(id: :child1, restart: :permanent)
+
+      child2 =
+        start_child!(id: :child2, restart: :temporary, ephemeral?: false, binds_to: [:child1])
+
+      child3 =
+        start_child!(id: :child3, restart: :temporary, ephemeral?: true, binds_to: [:child1])
+
+      provoke_child_termination!(:child1)
+      refute child_pid!(:child2) in [:undefined, child2]
+      refute child_pid!(:child3) in [:undefined, child3]
+    end
+
+    test "causes bound siblings to be stopped regardless of their restart strategy if the terminated child is not restarted" do
+      Parent.initialize()
+      start_child!(id: :child1, restart: :temporary)
+      start_child!(id: :child2, restart: :transient, binds_to: [:child1])
+      start_child!(id: :child3, restart: :permanent, binds_to: [:child1])
+
+      provoke_child_termination!(:child1)
+      assert child_pid!(:child1) == :undefined
+      assert child_pid!(:child2) == :undefined
+      assert child_pid!(:child3) == :undefined
+    end
+
+    test "causes bound siblings to be removed regardless of their ephemeral status or restart strategy if the terminated child is not restarted" do
+      Parent.initialize()
+      start_child!(id: :child1, restart: :temporary, ephemeral?: true)
+      start_child!(id: :child2, restart: :transient, binds_to: [:child1])
+      start_child!(id: :child3, restart: :permanent, binds_to: [:child1])
+
+      assert {:stopped_children, stopped_children} = provoke_child_termination!(:child1)
+      assert Enum.sort(Map.keys(stopped_children)) == ~w/child1 child2 child3/a
       assert Parent.children() == []
     end
 
-    test "default restart limit is 3 restarts in 5 seconds" do
+    test "causes bound ephemeral siblings to be removed if a non-ephemeral terminated child is not restarted" do
+      Parent.initialize()
+      start_child!(id: :child1, restart: :temporary)
+      start_child!(id: :child2, restart: :transient, ephemeral?: true, binds_to: [:child1])
+      start_child!(id: :child3, restart: :permanent, ephemeral?: true, binds_to: [:child1])
+      start_child!(id: :child4, restart: :permanent, ephemeral?: false, binds_to: [:child1])
+
+      assert {:stopped_children, stopped_children} = provoke_child_termination!(:child1)
+      assert Enum.sort(Map.keys(stopped_children)) == ~w/child2 child3/a
+
+      assert [%{id: :child1, pid: :undefined}, %{id: :child4, pid: :undefined}] =
+               Parent.children()
+    end
+
+    test "takes down the entire parent on too many restarts" do
       Parent.initialize(max_restarts: 2)
 
       start_child!(id: :child1)
       start_child!(id: :child2)
       start_child!(id: :child3)
 
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child2)
+      provoke_child_termination!(:child1)
+      provoke_child_termination!(:child2)
 
-      log =
-        assert_parent_exit(
-          fn -> provoke_child_restart!(:child3, at: 4999) end,
-          :too_many_restarts
-        )
-
+      log = assert_parent_exit(fn -> provoke_child_termination!(:child3) end, :too_many_restarts)
       assert log =~ "[error] Too many restarts in parent process"
       assert Parent.children() == []
-
-      start_child!(id: :child1)
-      start_child!(id: :child2)
-      start_child!(id: :child3)
-
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child2)
-      provoke_child_restart!(:child3, at: 5000)
     end
 
     test "takes down the entire parent on too many restarts of a single child" do
@@ -586,10 +578,10 @@ defmodule ParentTest do
       start_child!(id: :child1, max_restarts: 2, max_seconds: 1)
       start_child!(id: :child2)
 
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child1)
+      provoke_child_termination!(:child1)
+      provoke_child_termination!(:child1)
 
-      log = assert_parent_exit(fn -> provoke_child_restart!(:child1) end, :too_many_restarts)
+      log = assert_parent_exit(fn -> provoke_child_termination!(:child1) end, :too_many_restarts)
       assert log =~ "[error] Too many restarts in parent process"
       assert Parent.children() == []
     end
@@ -598,20 +590,10 @@ defmodule ParentTest do
       Parent.initialize(max_restarts: :infinity)
       start_child!(id: :child1, max_restarts: :infinity)
 
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child1)
-    end
-
-    test "default max_restarts of a child is infinity" do
-      Parent.initialize(max_restarts: :infinity)
-      start_child!(id: :child1)
-
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child1)
-      provoke_child_restart!(:child1)
+      provoke_child_termination!(:child1)
+      provoke_child_termination!(:child1)
+      provoke_child_termination!(:child1)
+      provoke_child_termination!(:child1)
     end
 
     test "clears recorded restarts after the interval has passed" do
@@ -620,9 +602,9 @@ defmodule ParentTest do
       start_child!(id: :child1, max_restarts: 2, max_seconds: 2)
       start_child!(id: :child2)
 
-      provoke_child_restart!(:child1, at: :timer.seconds(0))
-      provoke_child_restart!(:child1, at: :timer.seconds(1))
-      provoke_child_restart!(:child1, at: :timer.seconds(2))
+      provoke_child_termination!(:child1, at: :timer.seconds(0))
+      provoke_child_termination!(:child1, at: :timer.seconds(1))
+      provoke_child_termination!(:child1, at: :timer.seconds(2))
     end
   end
 
@@ -851,7 +833,7 @@ defmodule ParentTest do
 
       start_child!(id: :child, meta: 1)
       Parent.update_child_meta(:child, &(&1 + 1))
-      provoke_child_restart!(:child)
+      provoke_child_termination!(:child)
 
       assert Parent.child_meta(:child) == {:ok, 1}
     end
@@ -1085,15 +1067,7 @@ defmodule ParentTest do
   defp handle_parent_message,
     do: Parent.handle_message(assert_receive message)
 
-  defp provoke_child_restart!(child_id, opts \\ []) do
-    now_ms = Keyword.get(opts, :at, 0)
-    Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> now_ms end)
-    {:ok, pid} = Parent.child_pid(child_id)
-    Process.exit(pid, Keyword.get(opts, :reason, :shutdown))
-    handle_parent_message()
-  end
-
-  defp provoke_child_termination!(child_id, opts) do
+  defp provoke_child_termination!(child_id, opts \\ []) do
     now_ms = Keyword.get(opts, :at, 0)
     Mox.stub(Parent.RestartCounter.TimeProvider.Test, :now_ms, fn -> now_ms end)
     {:ok, pid} = Parent.child_pid(child_id)
