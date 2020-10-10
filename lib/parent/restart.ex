@@ -50,10 +50,11 @@ defmodule Parent.Restart do
   defp return_children(state, [child | children], new_pids) do
     child = update_bindings(child, new_pids)
 
-    case return_child(state, child) do
-      {:ok, new_pid, state} ->
-        new_pids = Map.put(new_pids, child.pid, new_pid)
-        return_children(state, children, new_pids)
+    case Parent.start_child_process(state, child.spec) do
+      {:ok, new_pid, timer_ref} ->
+        state
+        |> State.reregister_child(child, new_pid, timer_ref)
+        |> return_children(children, Map.put(new_pids, child.pid, new_pid))
 
       {:error, start_error} ->
         # map remaining bindings
@@ -68,19 +69,6 @@ defmodule Parent.Restart do
       child.spec.binds_to,
       fn binds_to -> Enum.map(binds_to, &Map.get(new_pids, &1, &1)) end
     )
-  end
-
-  defp return_child(state, child) do
-    case Parent.start_child_process(state, child.spec) do
-      {:ok, new_pid, timer_ref} ->
-        {:ok, new_pid, State.reregister_child(state, child, new_pid, timer_ref)}
-
-      :ignore ->
-        {:ok, state}
-
-      error ->
-        error
-    end
   end
 
   defp shutdown_groups(children) do

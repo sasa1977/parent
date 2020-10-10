@@ -41,7 +41,7 @@ defmodule Parent.GenServer do
 
   From within the parent process, you can interact with the child processes using functions from
   the `Parent` module. All child processes should be started using `Parent` functions, such as
-  `Parent.start_child/1`, because otherwise `Parent` won't be aware of these processes and won't
+  `Parent.start_child/2`, because otherwise `Parent` won't be aware of these processes and won't
   be able to fulfill its guarantees.
 
   Note that you can start children from any callback, not just during `init/1`. In addition, you

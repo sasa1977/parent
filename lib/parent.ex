@@ -37,7 +37,7 @@ defmodule Parent do
   ## Child specification
 
   Child specification describes how the parent starts and manages a child. This specification if
-  passed to functions such as `start_child/1`, `Parent.Client.start_child/2`, or
+  passed to functions such as `start_child/2`, `Parent.Client.start_child/2`, or
   `Parent.Supervisor.start_link/2` to start a child process.
 
   The specification is a map which is a superset of the [Supervisor child
@@ -257,7 +257,7 @@ defmodule Parent do
   More specifically, to build a parent process you need to do the following:
 
   1. Invoke `initialize/0` when the process is started.
-  2. Use functions such as `start_child/1` to work with child processes.
+  2. Use functions such as `start_child/2` to work with child processes.
   3. When a message is received, invoke `handle_message/1` before handling the message yourself.
   4. If you receive a shutdown exit message from your parent, stop the process.
   5. Before terminating, invoke `shutdown_all/1` to stop all the children.
@@ -361,10 +361,10 @@ defmodule Parent do
   def initialized?(), do: not is_nil(Process.get(__MODULE__))
 
   @doc "Starts the child described by the specification."
-  @spec start_child(start_spec) :: on_start_child()
-  def start_child(child_spec) do
+  @spec start_child(start_spec, Keyword.t()) :: on_start_child()
+  def start_child(child_spec, overrides \\ []) do
     state = state()
-    child_spec = expand_child_spec(child_spec)
+    child_spec = Parent.child_spec(child_spec, overrides)
 
     with {:ok, pid, timer_ref} <- start_child_process(state, child_spec) do
       if pid != :undefined or not child_spec.ephemeral?,
@@ -643,10 +643,9 @@ defmodule Parent do
             end
 
           if State.registry?(state), do: Registry.register(pid, child_spec)
-
           {:ok, pid, timer_ref}
 
-        error ->
+        {:error, _} = error ->
           error
       end
     end

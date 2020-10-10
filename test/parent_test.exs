@@ -179,9 +179,9 @@ defmodule ParentTest do
 
       assert [child1, :undefined, child3] =
                Parent.start_all_children!([
-                 Supervisor.child_spec({Agent, fn -> :ok end}, id: :child1),
+                 Parent.child_spec({Agent, fn -> :ok end}, id: :child1),
                  %{id: :child2, start: fn -> :ignore end},
-                 Supervisor.child_spec({Agent, fn -> :ok end}, id: :child3)
+                 Parent.child_spec({Agent, fn -> :ok end}, id: :child3)
                ])
 
       assert Parent.child_pid(:child1) == {:ok, child1}
@@ -1086,7 +1086,7 @@ defmodule ParentTest do
     id = Map.get(overrides, :id, nil)
     succeed_on_child_start(id)
 
-    Parent.child_spec(
+    Parent.start_child(
       %{
         id: id,
         start:
@@ -1095,7 +1095,6 @@ defmodule ParentTest do
       },
       overrides
     )
-    |> Parent.start_child()
   end
 
   defp start_child!(overrides \\ []) do
