@@ -479,8 +479,8 @@ defmodule Parent do
   Note that you don't need to invoke this function in a `Parent.GenServer` callback module.
   """
   @spec handle_message(term) :: handle_message_response() | nil
-  def handle_message({:"$parent_call", client, {Parent.Client, message}}) do
-    GenServer.reply(client, Parent.Client.handle_request(message))
+  def handle_message({:"$parent_call", client, {Parent.Client, function, args}}) do
+    GenServer.reply(client, apply(__MODULE__, function, args))
     :ignore
   end
 
