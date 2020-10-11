@@ -4,13 +4,15 @@
 [![hexdocs.pm](https://img.shields.io/badge/docs-latest-green.svg?style=flat-square)](https://hexdocs.pm/parent/)
 [![Build Status](https://travis-ci.org/sasa1977/parent.svg?branch=master)](https://travis-ci.org/sasa1977/parent)
 
-Support for custom parenting of processes. See [docs](https://hexdocs.pm/parent/) for reference.
+Support for custom parenting of processes. See [docs](https://hexdocs.pm/parent/Parent.html) for reference.
 
-Parent is a toolkit for building processes which parent other children and manage their life cycles. The library provides features similar to `Supervisor`, including the support for automatic restarts and failure escalation (maximum restart intensity). Some additional benefits that Parent brings, when compared to `Supervisor` are:
+Parent is a toolkit for building processes which parent other children and manage their life cycles. The library provides features similar to `Supervisor`, such as the support for automatic restarts and failure escalation (maximum restart intensity), with some additional benefits that can help flattening the supervision tree, reduce the amount of custom process monitors, and simplify the process structure. The most important differences from `Supervisor` are:
 
+- No supervision strategies (one_for_one, rest_for_one, etc). Instead, Parent uses bindings and shutdown groups to achieve the similar behaviour.
+- No distinction between static and dynamic supervisors. Instead, a per-child option called `:ephemeral?` is used to achieve dynamic behaviour.
+- Basic registry-like capabilities for simple children discovery baked-in directly into parent.
 - Exposed lower level plumbing modules, such as `Parent.GenServer` and `Parent`, which can be used to build custom parent processes (i.e. supervisors with custom logic).
-- No supervision strategies (one_for_one, rest_for_one, etc). Instead, Parent uses bindings and shutdown groups to achieve the similar behaviour. This can result in flatter and simpler supervision trees.
-- Basic registry-like capabilities for simple children discovery.
+
 
 ## Examples
 
@@ -74,7 +76,7 @@ end
 ### Pausing and resuming a part of the system
 
 ```elixir
-# stops child1 and all children depending on it
+# stops child1 and all children depending on it, removing it from the parent
 stopped_children = Parent.Client.shutdown_child(some_parent, :child1)
 
 # ...
