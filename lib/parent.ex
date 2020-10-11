@@ -385,12 +385,14 @@ defmodule Parent do
     Enum.map(
       child_specs,
       fn child_spec ->
-        case start_child(child_spec) do
+        full_spec = Parent.child_spec(child_spec)
+
+        case start_child(full_spec) do
           {:ok, pid} ->
             pid
 
           {:error, error} ->
-            msg = "Error starting the child #{inspect(child_spec.id)}: #{inspect(error)}"
+            msg = "Error starting the child #{inspect(full_spec.id)}: #{inspect(error)}"
             give_up!(state(), :start_error, msg)
         end
       end
