@@ -32,7 +32,7 @@ defmodule Parent.Supervisor do
   Refer to the `Parent` module for detailed explanation of child specifications, parent options,
   and behaviour of parent processes.
 
-  In case you need more flexibility, take a look `Parent.GenServer`.
+  In case you need more flexibility, take a look at `Parent.GenServer`.
   """
   use Parent.GenServer
 
