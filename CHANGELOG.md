@@ -1,3 +1,35 @@
+# 0.11.0
+
+## Sumary
+
+This version adds the remaining of the `Supervisor` behaviour to `Parent`, such as automatic child restarts, self-termination when maximum restart intensity is exceeded, and binding lifecycles of children. The new module `Parent.Supervisor` provides the highest-level interface, roughly comparable to a callbackless `Supervisor`. However, all of the parenting features are available in lower level modules, `Parent.GenServer` (which is similar to a callback-based `Supervisor` + `GenServer`) and `Parent` (which can be thought of as a toolkit for building custom parent behaviours and processes). The new module `Parent.Client` can be used to interact with any parent process from the outside (i.e. from other processes).
+
+Beyond just mirroring supervisor functionality, `Parent` explores some different approaches, most notably:
+
+- There are no supervision strategies. Instead, the options `:binds_to` and `:shutdown_group` can be used to bind lifecycles of children.
+- There's no per-parent distinction between static and dynamic (aka `:simple_one_for_one` or `DynamicSupervisor`) parents. The same process can be used to parent both static and dynamic children, using the per-child `:ephemeral?` setting to control the behaviour for each child.
+- Parent supports fine-grained children discovery, and the optional `:registry?` option for exposing children info via an ETS table.
+
+As a result, `Parent` can help in flattening and simplifying the supervision tree. Refer to documentation for more details, starting with the README page for a quick showcase, and the `Parent` module docs for a detailed reference.
+
+## Breaking changes
+
+- Requires Elixir 1.10+
+- Callback `GenServer.handle_child_terminated` has been renamed to `GenServer.handle_stopped_children`. In addition, the callback now receives only two arguments. Refer to documentation for details.
+- Children are by default permanent and non-ephemeral, which changes the behaviour compared to previous versions. To retain the previous behaviour, include `restart: :temporary, ephemeral?: true` in a childspec of every child. See `Parent` documentation for details.
+- `Parent.await_child_termination/2` is removed.
+- Return type of functions `Parent.children/0`, `Parent.handle_message/1`, `Parent.shutdown_child/1`, `Parent.restart_child/1` has changed. See `Parent` documentation for details.
+- Previously deprecated `Parent.GenServer` functions are removed. You can use `Parent.Client` functions instead.
+
+## Additions
+
+- Support for automatic restarts of children via the `:restart` option, and maximum restart intensity via the `:max_restarts` option.
+- Support for ephemeral children, which allows a per-child control of static/dynamic supervision behaviour.
+- Support for binding children lifecycles via options `:binds_to` and `:shutdown_group`.
+- Parent can act as an ETS-based registry using the `registry?: true` parent option.
+- Added `Parent.Supervisor`, which provides a high-level supervisor-like functionality.
+- Added `Parent.Client`, which provides API for interacting with parent processes from the outside.
+
 # 0.11.0-rc.1
 
 When restarting a child, parent will unconditionally restart all the siblings bound to it (directly or transitively), irrespective of their restart strategy.
