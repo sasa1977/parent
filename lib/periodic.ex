@@ -358,18 +358,22 @@ defmodule Periodic do
   end
 
   @impl Parent.GenServer
-  def handle_child_terminated(_id, meta, pid, reason, state) do
-    with from when not is_nil(from) <- meta.caller, do: GenServer.reply(from, {:ok, reason})
+  def handle_stopped_children(info, state) do
+    [info] = Map.values(info)
+
+    with from when not is_nil(from) <- info.meta.caller,
+         do: GenServer.reply(from, {:ok, info.exit_reason})
+
     if state.delay_mode == :shifted, do: enqueue_next_tick(state, state.every)
 
     duration =
       :erlang.convert_time_unit(
-        :erlang.monotonic_time() - meta.started_at,
+        :erlang.monotonic_time() - info.meta.started_at,
         :native,
         :microsecond
       )
 
-    telemetry(state, :finished, %{job: pid, reason: reason}, %{time: duration})
+    telemetry(state, :finished, %{job: info.pid, reason: info.exit_reason}, %{time: duration})
     {:noreply, state}
   end
 
@@ -426,7 +430,9 @@ defmodule Periodic do
         start: {Task, :start_link, [fn -> invoke_job(job) end]},
         timeout: state.timeout,
         shutdown: state.job_shutdown,
-        meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)}
+        restart: :temporary,
+        meta: %{started_at: :erlang.monotonic_time(), caller: Keyword.get(opts, :caller)},
+        ephemeral?: true
       })
 
     telemetry(state, :started, %{job: pid})
@@ -438,7 +444,7 @@ defmodule Periodic do
 
   defp previous_instance() do
     case Parent.children() do
-      [{_id, pid, _meta}] -> {:ok, pid}
+      [child] -> {:ok, child.pid}
       [] -> :error
     end
   end

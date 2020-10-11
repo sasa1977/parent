@@ -1,13 +1,13 @@
 defmodule Parent.MixProject do
   use Mix.Project
 
-  @version "0.10.0"
+  @version "0.11.0"
 
   def project do
     [
       app: :parent,
       version: @version,
-      elixir: "~> 1.6",
+      elixir: "~> 1.10",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -19,7 +19,8 @@ defmodule Parent.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      mod: {Parent.Application, []}
     ]
   end
 
@@ -27,6 +28,7 @@ defmodule Parent.MixProject do
     [
       {:dialyxir, "~> 0.5", runtime: false, only: [:dev, :test]},
       {:ex_doc, "~> #{ex_doc_version()}", only: :dev, runtime: false},
+      {:mox, "~> 0.5.0", only: :test},
       {:telemetry, "~> 0.4"}
     ]
   end
@@ -40,11 +42,13 @@ defmodule Parent.MixProject do
 
   defp docs() do
     [
-      extras: ["RATIONALE.md"],
-      main: "Parent",
+      extras: ["README.md"],
+      main: "readme",
       source_url: "https://github.com/sasa1977/parent/",
       source_ref: @version,
       groups_for_modules: [
+        Core: [Parent, Parent.Client],
+        Behaviours: [Parent.GenServer, Parent.Supervisor],
         "Periodic job execution": ~r/Periodic(\..+)?/
       ]
     ]

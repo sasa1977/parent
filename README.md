@@ -4,77 +4,254 @@
 [![hexdocs.pm](https://img.shields.io/badge/docs-latest-green.svg?style=flat-square)](https://hexdocs.pm/parent/)
 [![Build Status](https://travis-ci.org/sasa1977/parent.svg?branch=master)](https://travis-ci.org/sasa1977/parent)
 
-Support for custom parenting of processes. See [rationale](./RATIONALE.md) for detailed explanation, and [docs](https://hexdocs.pm/parent/) for reference.
+Support for custom parenting of processes. See [docs](https://hexdocs.pm/parent/Parent.html) for reference.
 
-## Example
+Parent is a toolkit for building processes which parent other children and manage their life cycles. The library provides features similar to `Supervisor`, such as the support for automatic restarts and failure escalation (maximum restart intensity), with some additional benefits that can help flattening the supervision tree, reduce the amount of custom process monitors, and simplify the process structure. The most important differences from `Supervisor` are:
 
-The following example implements a parent GenServer which starts a child task, and handles its termination by starting another task after one second.
+- No supervision strategies (one_for_one, rest_for_one, etc). Instead, Parent uses bindings and shutdown groups to achieve the similar behaviour.
+- No distinction between static and dynamic supervisors. Instead, a per-child option called `:ephemeral?` is used to achieve dynamic behaviour.
+- Basic registry-like capabilities for simple children discovery baked-in directly into parent.
+- Exposed lower level plumbing modules, such as `Parent.GenServer` and `Parent`, which can be used to build custom parent processes (i.e. supervisors with custom logic).
+
+
+## Examples
+
+### Basic supervisor
 
 ```elixir
-defmodule MyParent do
-  use Parent.GenServer
-  require Logger
+Parent.Supervisor.start_link(
+  # child spec is a superset of supervisor child specification
+  child_specs,
 
-  def start_link(_), do: Parent.GenServer.start_link(__MODULE__, nil)
+  # parent options, note that there's no `:strategy`
+  max_restarts: 3,
+  max_seconds: 5,
 
-  @impl GenServer
-  def init(_arg) do
-    start_job(1)
-    {:ok, nil}
-  end
+  # std. Supervisor/GenServer options
+  name: __MODULE__
+)
+```
 
-  @impl GenServer
-  def handle_info({:start_job, job_number}, state) do
-    start_job(job_number)
-    {:noreply, state}
-  end
+### Binding lifecycles
 
-  def handle_info(other, state), do: super(other, state)
+```elixir
+Parent.Supervisor.start_link(
+  [
+    Parent.child_spec(Child1),
+    Parent.child_spec(Child2, bind_to: [Child1]),
+    Parent.child_spec(Child3, bind_to: [Child1]),
+    Parent.child_spec(Child4, shutdown_group: :children4_to_6),
+    Parent.child_spec(Child5, shutdown_group: :children4_to_6),
+    Parent.child_spec(Child6, shutdown_group: :children4_to_6),
+    Parent.child_spec(Child7, bind_to: [Child1]),
+  ]
+)
+```
 
-  @impl Parent.GenServer
-  def handle_child_terminated(:job, job_number, _pid, _reason, state) do
-    Logger.info("job #{job_number} finished")
-    Process.send_after(self(), {:start_job, job_number + 1}, :timer.seconds(1))
-    {:noreply, state}
-  end
+- if `Child1` is restarted, `Child2`, `Child3`, and `Child7` will be restarted too
+- if `Child2`, `Child3`, or `Child7` is restarted, nothing else is restarted
+- if any of `Child4`, `Child5`, or `Child6` is restarted, all other processes from the shutdown group are restarted too
 
-  defp start_job(job_number) do
-    Logger.info("starting job #{job_number}")
+### Discovering siblings during startup
 
-    Parent.start_child(%{
-      id: :job,
-      start: {Task, :start_link, [&run_job/0]},
-      meta: job_number
-    })
-  end
+```elixir
+Parent.Supervisor.start_link(
+  [
+    Parent.child_spec(Child1),
+    Parent.child_spec(Child2, bind_to: [Child1]),
+    # ...
+  ]
+)
 
-  defp run_job() do
-    Logger.info("processing ...")
+defmodule Child2 do
+  def start_link do
+    # can be safely invoked inside the parent process
+    child1 = Parent.child_pid(:child1)
 
-    # simulates random job duration
-    Process.sleep(:rand.uniform(5000))
+    # ...
   end
 end
+```
 
-iex> Supervisor.start_link([MyParent], strategy: :one_for_one)
+### Pausing and resuming a part of the system
 
-09:26:28.153 [info] starting job 1
-09:26:28.156 [info] processing ...
-09:26:32.655 [info] job 1 finished
+```elixir
+# stops child1 and all children depending on it, removing it from the parent
+stopped_children = Parent.Client.shutdown_child(some_parent, :child1)
 
-09:26:33.656 [info] starting job 2
-09:26:33.656 [info] processing ...
-09:26:37.043 [info] job 2 finished
+# ...
 
-09:26:38.044 [info] starting job 3
-09:26:38.044 [info] processing ...
-09:26:40.702 [info] job 3 finished
-...
+# returns all stopped children back to the parent
+Parent.Client.return_children(some_parent, stopped_children)
+```
+
+### Dynamic supervisor with anonymous children
+
+```elixir
+Parent.Supervisor.start_link([])
+
+# set `ephemeral?: true` for dynamic children if child is temporary/transient
+{:ok, pid1} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil, ephemeral?: true))
+{:ok, pid2} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil, ephemeral?: true))
+# ...
+
+Parent.Client.shutdown_child(MySup, pid1)
+Parent.Client.restart_child(MySup, pid2)
+```
+
+### Dynamic supervisor with child discovery
+
+```elixir
+Parent.Supervisor.start_link([], name: MySup)
+
+# meta is an optional value associated with the child
+Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id1, ephemeral?: true, meta: some_meta))
+Parent.Client.start_child(MySup, Parent.child_spec(Child, id: id2, ephemeral?: true, meta: another_meta))
+# ...
+
+# synchronous calls into the parent process
+pid = Parent.Client.child_pid(MySup, id1)
+meta = Parent.Client.child_meta(MySub, id1)
+all_children = Parent.Client.children(MySup)
+```
+
+Optional ETS-powered registry:
+
+```elixir
+Parent.Supervisor.start_link([], registry?: true)
+
+# start some children
+
+# ETS lookup, no call into parent involved
+Parent.Client.child_pid(my_sup, id1)
+Parent.Client.children(my_sup)
+```
+
+### Per-child max restart frequency
+
+```elixir
+Parent.Supervisor.start_link(
+  [
+    Parent.child_spec(Child1, max_restarts: 10, max_seconds: 10),
+    Parent.child_spec(Child2, max_restarts: 3, max_seconds: 5)
+  ],
+
+  # Per-parent max restart frequency can be disabled, or a parent-wide limit can be used. In the
+  # former case make sure that this limit is higher than the limit of any child.
+  max_restarts: :infinity
+)
+```
+
+### Module-based supervisor
+
+```elixir
+defmodule MySup do
+  use Parent.GenServer
+
+  def start_link(init_arg),
+    do: Parent.GenServer.start_link(__MODULE__, init_arg, name: __MODULE__)
+
+  @impl GenServer
+  def init(_init_arg) do
+    Parent.start_all_children!(children)
+    {:ok, initial_state}
+  end
+end
+```
+
+### Restarting with a delay
+
+```elixir
+defmodule MySup do
+  use Parent.GenServer
+
+  def start_link(init_arg),
+    do: Parent.GenServer.start_link(__MODULE__, init_arg, name: __MODULE__)
+
+  @impl GenServer
+  def init(_init_arg) do
+    # Make sure that children are temporary and ephemeral b/c otherwise `handle_stopped_children/2`
+    # won't be invoked.
+    Parent.start_all_children!(children)
+    {:ok, initial_state}
+  end
+
+  @impl Parent.GenServer
+  def handle_stopped_children(stopped_children, state) do
+    # invoked when a child stops and is not restarted
+    Process.send_after(self, {:restart, stopped_children}, delay)
+    {:noreply, state}
+  end
+
+  def handle_info({:restart, stopped_children}, state) do
+    # Returns the child to the parent preserving its place according to startup order and bumping
+    # its restart count. This is basically a manual restart.
+    Parent.return_children(stopped_children)
+    {:noreply, state}
+  end
+end
+```
+
+### Starting additional children after a child stops
+
+```elixir
+defmodule MySup do
+  use Parent.GenServer
+
+  def start_link(init_arg),
+    do: Parent.GenServer.start_link(__MODULE__, init_arg, name: __MODULE__)
+
+  @impl GenServer
+  def init(_init_arg) do
+    Parent.start_child(first_child_spec)
+    {:ok, initial_state}
+  end
+
+  @impl Parent.GenServer
+  def handle_stopped_children(%{child1: info}, state) do
+    Parent.start_child(other_children)
+    {:noreply, state}
+  end
+
+  def handle_stopped_children(_other, state), do: {:noreply, state}
+end
+```
+
+### Building a custom parent process or behaviour from scratch
+
+```elixir
+defp init_process do
+  Parent.initialize(parent_opts)
+  start_some_children()
+  loop()
+end
+
+defp loop() do
+  receive do
+    msg ->
+      case Parent.handle_message(msg) do
+        # parent handled the message
+        :ignore -> loop()
+
+        # parent handled the message and returned some useful information
+        {:stopped_children, stopped_children} -> handle_stopped_children(stopped_children)
+
+        # not a parent message
+        nil -> custom_handle_message(msg)
+      end
+  end
+end
 ```
 
 ## Status
 
-This library has been used in the production code, but not extensively.
+This library has seen production usage in a couple of different projects. However, features such as automatic restarts and ETS registry are pretty fresh (aded in late 2020) and so they haven't seen any serious production testing yet.
+
+Based on a very quick & shallow test, Parent is about 3x slower and consumes about 2x more memory than DynamicSupervisor.
+
+The API is prone to significant changes.
+
+Compared to supervisor crash reports, the error logging is very basic and probably not sufficient.
 
 ## License
 

@@ -1,215 +1,209 @@
 defmodule Parent.GenServer do
   @moduledoc """
-  A GenServer extension which simplifies parenting of child processes.
+  GenServer with parenting capabilities powered by `Parent`.
 
-  This behaviour helps implementing a GenServer which also needs to directly
-  start child processes and handle their termination.
+  This behaviour can be useful in situations where `Parent.Supervisor` won't suffice.
 
-  ## Starting the process
+  ## Example
 
-  The usage is similar to GenServer. You need to use the module and start the
-  process:
+  The following example is roughly similar to a standard
+  [callback-based Supervisor](https://hexdocs.pm/elixir/Supervisor.html#module-module-based-supervisors):
 
-  ```
-  def MyParentProcess do
-    use Parent.GenServer
+      defmodule MyApp.Supervisor do
+        # Automatically defines child_spec/1
+        use Parent.GenServer
 
-    def start_link(arg) do
-      Parent.start_link(__MODULE__, arg, options \\\\ [])
-    end
-  end
-  ```
+        def start_link(init_arg),
+          do: Parent.GenServer.start_link(__MODULE__, init_arg, name: __MODULE__)
 
-  The expression `use Parent.GenServer` will also inject `use GenServer` into
-  your code. Your parent process is a GenServer, and this behaviour doesn't try
-  to hide it. Except when starting the process, you work with the parent exactly
-  as you work with any GenServer, using the same functions, and writing the same
-  callbacks:
+        @impl GenServer
+        def init(_init_arg) do
+          Parent.start_all_children!(children)
+          {:ok, initial_state}
+        end
+      end
 
-  ```
-  def MyParentProcess do
-    use Parent.GenServer
+  The expression `use Parent.GenServer` will also inject `use GenServer` into your code. Your
+  parent process is a GenServer, and this behaviour doesn't try to hide it. Except when starting
+  the process, you work with the parent exactly as you work with any GenServer, using the same
+  functions, such as `GenServer.call/3`, and providing the same callbacks, such as `init/1`, or
+  `handle_call/3`.
 
-    def do_something(pid, arg), do: GenServer.call(pid, {:do_something, arg})
+  ## Interacting with the parent from the outside
 
-    ...
+  You can issue regular `GenServer` calls and casts, and send messages to the parent, which can
+  be handled by corresponding `GenServer` callbacks. In addition, you can use functions from
+  the `Parent.Client` module to manipulate or query the parent state from other processes. As a
+  good practice, it's advised to wrap such invocations in the module which implements
+  `Parent.GenServer`.
 
-    @impl GenServer
-    def init(arg), do: {:ok, initial_state(arg)}
+  ## Interacting with children inside the parent
 
-    @impl GenServer
-    def handle_call({:do_something, arg}, _from, state),
-      do: {:reply, response(state, arg), next_state(state, arg)}
-  end
-  ```
+  From within the parent process, you can interact with the child processes using functions from
+  the `Parent` module. All child processes should be started using `Parent` functions, such as
+  `Parent.start_child/2`, because otherwise `Parent` won't be aware of these processes and won't
+  be able to fulfill its guarantees.
 
-  Compared to plain GenServer, there are following differences:
+  Note that you can start children from any callback, not just during `init/1`. In addition, you
+  don't need to start all children at once. Therefore, `Parent.GenServer` can prove useful when
+  you need to make some runtime decisions:
 
-  - A Parent.GenServer traps exits by default.
-  - The generated `child_spec/1` has the `:shutdown` configured to `:infinity`.
-  - The generated `child_spec/1` specifies the `:type` configured to `:supervisor`
+        {:ok, child1} = Parent.start_child(child1_spec)
 
-  ## Starting child processes
+        if some_condition_met?,
+          do: Parent.start_child(child2_spec)
 
-  To start a child process, you can invoke `Parent.start_child/1` in the parent process:
+        Parent.start_child(child3_spec)
 
-  ```
-  def handle_call(...) do
-    Parent.start_child(child_spec)
-    ...
-  end
-  ```
-
-  The function takes a child spec map which is similar to Supervisor child
-  specs. The map has the following keys:
-
-    - `:id` (required) - a term uniquely identifying the child
-    - `:start` (required) - an MFA, or a zero arity lambda invoked to start the child
-    - `:meta` (optional) - a term associated with the started child, defaults to `nil`
-    - `:shutdown` (optional) - same as with `Supervisor`, defaults to 5000
-    - `:timeout` (optional) - timeout after which the child is killed by the parent,
-      see the timeout section below, defaults to `:infinity`
-
-  The function described with `:start` needs to start a linked process and return
-  the result as `{:ok, pid}`. For example:
-
-  ```
-  Parent.start_child(%{
-    id: :hello_world,
-    start: {Task, :start_link, [fn -> IO.puts "Hello, World!" end]}
-  })
-  ```
-
-  You can also pass a zero-arity lambda for `:start`:
-
-  ```
-  Parent.start_child(%{
-    id: :hello_world,
-    start: fn -> Task.start_link(fn -> IO.puts "Hello, World!" end) end
-  })
-  ```
-
-  Finally, a child spec can also be a module, or a `{module, arg}` function.
-  This works similarly to supervisor specs, invoking `module.child_spec/1`
-  is which must provide the final child specification.
+  However, bear in mind that this code won't be executed again if the processes are restarted.
 
   ## Handling child termination
 
-  When a child process terminates, `handle_child_terminated/5` will be invoked.
-  The default implementation is injected into the module, but you can of course
-  override it:
+  If a child process terminates and isn't restarted, the `c:handle_stopped_children/2` callback is
+  invoked. The default implementation does nothing.
 
-  ```
-  @impl Parent.GenServer
-  def handle_child_terminated(id, child_meta, pid, reason, state) do
-    ...
-    {:noreply, state}
-  end
-  ```
+  The following example uses `c:handle_stopped_children/2` to start a child task and report if it
+  it crashes:
 
-  The return value of `handle_child_terminated` is the same as for `handle_info`.
+        defmodule MyJob do
+          use Parent.GenServer, restart: :temporary
 
-  ## Timeout
+          def start_link(arg), do: Parent.GenServer.start_link(__MODULE__, arg)
 
-  If a positive integer is provided via the `:timeout` option, the parent will
-  terminate the child if it doesn't stop within the given time. In this case,
-  `handle_child_terminated/5` will be invoked with the exit reason `:timeout`.
+          @impl GenServer
+          def init(_) do
+            {:ok, _} = Parent.start_child(%{
+              id: :job,
+              start: {Task, :start_link, [fn -> job(arg) end]},
+              restart: :temporary,
 
-  ## Working with child processes
+              # handle_stopped_children won't be invoked without this
+              ephemeral?: true
+            })
+            {:ok, nil}
+          end
 
-  The `Parent` module provides various functions for managing child processes.
-  For example, you can enumerate running children with `Parent.children/0`,
-  fetch child meta with `Parent.child_meta/1`, or terminate a child process with
-  `Parent.shutdown_child/1`.
+          @impl Parent.GenServer
+          def handle_stopped_children(%{job: info}, state) do
+            if info.reason != :normal do
+              # report job failure
+            end
 
-  ## Termination
+            {:stop, reason, state}
+          end
+        end
 
-  The behaviour takes down the child processes during termination, to ensure that
-  no child process is running after the parent has terminated. The children are
-  terminated synchronously, one by one, in the reverse start order.
+  `handle_stopped_children` can be useful to implement arbitrary custom behaviour, such as
+  restarting after a delay, and using incremental backoff periods between two consecutive starts.
 
-  The termination of the children is done after the `terminate/1` callback returns.
-  Therefore in `terminate/1` the child processes are still running, and you can
-  interact with them.
+  For example, this is how you could introduce a delay between two consecutive starts:
 
-  ## Supervisor compliance
+      def handle_stopped_children(stopped_children, state) do
+        Process.send_after(self, {:restart, stopped_children}, delay)
+        {:noreply, state}
+      end
 
-  A process powered by `Parent.GenServer` can handle supervisor specific
-  messages, which means that for all intents and purposes, such process is
-  treated as a supervisor. As a result, children of parent will be included in
-  the hot code reload process.
+      def handle_info({:restart, stopped_children}, state) do
+        Parent.return_children(stopped_children)
+        {:noreply, state}
+      end
+
+  Keep in mind that `handle_stopped_children` is only invoked if the child crashed on its own,
+  and if it's not going to be restarted.
+
+  If the child was explicitly stopped via a `Parent` function, such as `Parent.shutdown_child/1`,
+  this callback will not be invoked. The same holds for `Parent.Client` functions. If you want
+  to unconditionally react to a termination of a child process, setup a monitor with `Process.monitor`
+  and add a corresponding `handle_info` clause.
+
+  If the child was taken down because its lifecycle is bound to some other process, the
+  corresponding `handle_stopped_children` won't be invoked. For example, if process A is bound to
+  process B, and process B crashes, only one `handle_stopped_children` will be invoked (for the
+  crash of process B). However, the corresponding `info` will contain the list of all associated
+  siblings that have been taken down, and `stopped_children` will include information necessary to
+  restart all of these siblings. Refer to `Parent` documentation for details on lifecycles binding.
+
+  ## Parent termination
+
+  The behaviour takes down the child processes before it terminates, to ensure that no child
+  process is running after the parent has terminated. The children are terminated synchronously,
+  one by one, in the reverse start order.
+
+  The termination of the children is done after the `terminate/1` callback returns. Therefore in
+  `terminate/1` the child processes are still running, and you can interact with them, and even
+  start additional children.
+
+  ## Caveats
+
+  Like any other `Parent`-based process, `Parent.GenServer` traps exits and uses the `:infinity`
+  shutdown strategy. As a result, a parent process which blocks for a long time (e.g. because its
+  communicating with a remote service) won't be able to handle child termination, and your
+  fault-tolerance might be badly affected. In addition, a blocking parent might completely paralyze
+  the system (or a subtree) shutdown. Setting a shutdown strategy to a finite time is a hacky
+  workaround that will lead to lingering orphan processes, and might cause some strange race
+  conditions which will be very hard to debug.
+
+  Therefore, be wary of having too much logic inside a parent process. Try to push as much
+  responsibilities as possible to other processes, such as children or siblings, and use parent
+  only for coordination and reporting tasks.
+
+  Finally, since parent trap exits, it's possible to receive an occasional stray `:EXIT` message
+  if the child crashes during its initialization.
+
+  By default `use Parent.GenServer` receives such messages and ignores them. If you're implementing
+  your own `handle_info`, make sure to include a clause for `:EXIT` messages:
+
+        def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
   """
   use GenServer
 
   @type state :: term
+  @type options :: [Parent.option() | GenServer.option()]
 
-  @doc "Invoked when a child has terminated."
-  @callback handle_child_terminated(
-              Parent.child_id(),
-              Parent.child_meta(),
-              pid,
-              reason :: term,
-              state
-            ) ::
+  @doc """
+  Invoked when some children have terminated.
+
+  The `info` map will contain all the children which have been stopped together. For example,
+  if child A is bound to child B, and child B terminates, parent will also terminate the child
+  A. In this case, `handle_stopped_children` is invoked only once, with the `info` map containing
+  entries for both children.
+
+  This callback will not be invoked in the following cases:
+
+    - a child is terminated by invoking `Parent` functions such as `Parent.shutdown_child/1`
+    - a child is restarted
+    - a child is not ephemeral (see "Ephemeral children" in `Parent` for details)
+  """
+  @callback handle_stopped_children(info :: Parent.stopped_children(), state) ::
               {:noreply, new_state}
               | {:noreply, new_state, timeout | :hibernate}
               | {:stop, reason :: term, new_state}
             when new_state: state
 
   @doc "Starts the parent process."
-  @spec start_link(module, arg :: term, GenServer.options()) :: GenServer.on_start()
+  @spec start_link(module, arg :: term, options) :: GenServer.on_start()
   def start_link(module, arg, options \\ []) do
-    GenServer.start_link(__MODULE__, {module, arg}, options)
+    {parent_opts, gen_server_opts} =
+      Keyword.split(options, ~w/max_restarts max_seconds registry?/a)
+
+    GenServer.start_link(__MODULE__, {module, arg, parent_opts}, gen_server_opts)
   end
 
-  @deprecated "Use Parent.start_child/1 instead"
-  defdelegate start_child(child_spec), to: Parent
-
-  @deprecated "Use Parent.shutdown_child/1 instead"
-  defdelegate shutdown_child(child_id), to: Parent
-
-  @deprecated "Use Parent.shutdown_all/1 instead"
-  defdelegate shutdown_all(reason \\ :shutdown), to: Parent
-
-  @deprecated "Use Parent.children/0 instead"
-  defdelegate children(), to: Parent
-
-  @deprecated "Use Parent.num_children/0 instead"
-  defdelegate num_children(), to: Parent
-
-  @deprecated "Use Parent.child_id/1 instead"
-  defdelegate child_id(pid), to: Parent
-
-  @deprecated "Use Parent.child_pid/1 instead"
-  defdelegate child_pid(id), to: Parent
-
-  @deprecated "Use Parent.child_meta/1 instead"
-  defdelegate child_meta(id), to: Parent
-
-  @deprecated "Use Parent.update_child_meta/2 instead"
-  defdelegate update_child_meta(id, updater), to: Parent
-
-  @deprecated "Use Parent.await_child_termination/2 instead"
-  defdelegate await_child_termination(id, timeout), to: Parent
-
-  @deprecated "Use Parent.child?/1 instead"
-  defdelegate child?(id), to: Parent
-
   @impl GenServer
-  def init({callback, arg}) do
+  def init({callback, arg, options}) do
     # needed to simulate a supervisor
     Process.put(:"$initial_call", {:supervisor, callback, 1})
 
     Process.put({__MODULE__, :callback}, callback)
-    Parent.initialize()
+    Parent.initialize(options)
     invoke_callback(:init, [arg])
   end
 
   @impl GenServer
   def handle_info(message, state) do
     case Parent.handle_message(message) do
-      {:EXIT, pid, id, meta, reason} ->
-        invoke_callback(:handle_child_terminated, [id, meta, pid, reason, state])
+      {:stopped_children, info} ->
+        invoke_callback(:handle_stopped_children, [info, state])
 
       :ignore ->
         {:noreply, state}
@@ -225,6 +219,9 @@ defmodule Parent.GenServer do
 
   def handle_call(:count_children, _from, state),
     do: {:reply, Parent.supervisor_count_children(), state}
+
+  def handle_call({:get_childspec, child_id_or_pid}, _from, state),
+    do: {:reply, Parent.supervisor_get_childspec(child_id_or_pid), state}
 
   def handle_call(message, from, state), do: invoke_callback(:handle_call, [message, from, state])
 
@@ -277,20 +274,48 @@ defmodule Parent.GenServer do
       See `Supervisor`.
       """
       def child_spec(arg) do
-        default = %{
-          id: __MODULE__,
-          start: {__MODULE__, :start_link, [arg]},
-          shutdown: :infinity,
-          type: :supervisor
-        }
-
+        default = Parent.parent_spec(id: __MODULE__, start: {__MODULE__, :start_link, [arg]})
         Supervisor.child_spec(default, unquote(Macro.escape(opts)))
       end
 
       @impl behaviour
-      def handle_child_terminated(_id, _meta, _pid, _reason, state), do: {:noreply, state}
+      def handle_stopped_children(_info, state), do: {:noreply, state}
 
-      defoverridable handle_child_terminated: 5, child_spec: 1
+      @impl GenServer
+      # automatic ignoring of `:EXIT` messages which may occur if a child crashes during its `start_link`
+      def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+
+      def handle_info(msg, state) do
+        # copied over from `GenServer`, b/c calling `super` is not allowed
+        proc =
+          case Process.info(self(), :registered_name) do
+            {_, []} -> self()
+            {_, name} -> name
+          end
+
+        :logger.error(
+          %{
+            label: {GenServer, :no_handle_info},
+            report: %{
+              module: __MODULE__,
+              message: msg,
+              name: proc
+            }
+          },
+          %{
+            domain: [:otp, :elixir],
+            error_logger: %{tag: :error_msg},
+            report_cb: &GenServer.format_report/1
+          }
+        )
+
+        {:noreply, state}
+      end
+
+      @impl GenServer
+      def code_change(_old, state, _extra), do: {:ok, state}
+
+      defoverridable handle_info: 2, handle_stopped_children: 2, child_spec: 1, code_change: 3
     end
   end
 end
