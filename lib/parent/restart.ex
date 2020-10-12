@@ -1,4 +1,5 @@
 defmodule Parent.Restart do
+  @moduledoc false
   alias Parent.State
 
   # core logic of all restarts, both automatic and manual

@@ -36,7 +36,7 @@ defmodule Parent do
 
   ## Child specification
 
-  Child specification describes how the parent starts and manages a child. This specification if
+  Child specification describes how the parent starts and manages a child. This specification is
   passed to functions such as `start_child/2`, `Parent.Client.start_child/2`, or
   `Parent.Supervisor.start_link/2` to start a child process.
 
@@ -59,8 +59,8 @@ defmodule Parent do
   You can bind the lifecycle of each child to the lifecycles of its older siblings. This is roughly
   similar to the `:rest_for_one` supervisor strategy.
 
-  For example, if you want to start two children, consumer and producer, and bind the producer's
-  lifecycle to the consumer, you need the following child specifications:
+  For example, if you want to start two children, a consumer and a producer, and bind the
+  producer's lifecycle to the consumer, you need the following child specifications:
 
       consumer_spec = %{
         id: :consumer,
@@ -99,23 +99,21 @@ defmodule Parent do
       }
 
   In this case, when any child of the group terminates, the other children will be taken down as
-  well.
+  well. All children belonging to the same shutdown group must use the same `:restart` and
+  `:ephemeral` settings.
 
-  All children belonging to the same shutdown group must use the same `:restart` option.
-
-  Note that a child can be a member of some shutdown group, and bound to other older siblings.
+  Note that a child can be a member of some shutdown group, and at the same time bound to other
+  older siblings.
 
   ## Lifecycle dependency consequences
 
-  As has been mentioned, a lifecycle dependency means that a child is taken down when its
-  dependency stops. This will happen irrespective of how the child has been stopped. Even if you
-  manually stop the child using functions such as `shutdown_child/1` or
-  `Parent.Client.shutdown_child/2`, the siblings bound to it will be taken down.
+  A lifecycle dependency means that a child is taken down when its dependency stops. This will
+  happen irrespective of how the child has been stopped. Even if you manually stop the child using
+  functions such as `shutdown_child/1` or `Parent.Client.shutdown_child/2`, the siblings bound to
+  it will be taken down.
 
-  In general, parent doesn't permit the state which violates binding settings. If the process A is
-  bound to the process B, you can never reach the state where A is running but B isn't. Of course,
-  since things are taking place concurrently, such state might briefly exists until parent
-  is able to shutdown all bound processes.
+  In general, parent doesn't permit the state which violates the binding settings. If the process A
+  is bound to the process B, parent will not allow A to keep running if B stops.
 
   ## Handling child termination
 
@@ -126,22 +124,21 @@ defmodule Parent do
     - set the child's pid to `:undefined`
     - remove the child from its internal structures
 
-  This decision will be based on two child settings: `:restart` and `:ephemeral`.
-
   The `:restart` option controls when a child will be automatically restarted by its parent:
 
     - `:permanent` - A child is automatically restarted if it stops. This is the default value.
     - `:transient` - A child is automatically restarted only if it exits abnormally.
     - `:temporary` - A child is not automatically restarted.
 
-  The `:ephemeral` option controls what to do when a child is not-running and will not be
-  restarted. This typically happens when a transient child stops normally, or when a temporary
-  child stops, but it can also happen is the child's start function returns `:ignore`.
+  The `:ephemeral` option controls what to do when a non-running child is will not be restarted.
+  Such situation can happen when a temporary child terminates, when a transient child stops
+  normally, or if the child's start function returns `:ignore`.
 
   If the child is not marked as ephemeral (default), parent will keep the child in its internal
-  structures, setting its pid to `:undefined`. Functions such as `Parent.children/0` will return
-  such child in the result, and such child can be restarted using `Parent.restart_child/1`. This
-  mimics the behaviour of "static supervisors" (i.e. one_for_one, rest_for_one, one_for_all).
+  structures, setting its pid to `:undefined`. Functions such as `Parent.children/0` will include
+  the non-running child in the result, and such child can be restarted using
+  `Parent.restart_child/1`. This mimics the behaviour of "static supervisors" (i.e. one_for_one,
+  rest_for_one, one_for_all).
 
   If the child is marked as ephemeral, parent will remove the child from its internal structures.
   This mimics the behaviour of `DynamicSupervisor`.
@@ -154,7 +151,7 @@ defmodule Parent do
   ones.
 
   If a child is not restarted, its ephemeral bound siblings will be removed. This is the only case
-  where parent honors the `:ephemeral` status of the sibling.
+  where parent honors the `:ephemeral` status of bound siblings.
 
   ## Restart flow
 
@@ -164,7 +161,7 @@ defmodule Parent do
     - `restart_child/1` has been invoked (manual restart)
     - `return_children/2` has been invoked (returning removed children)
 
-  In all these situations, the flow is the same. Parent will first synchronously stop the bound
+  In all these situations the flow is the same. Parent will first synchronously stop the bound
   dependencies of the child (in the reverse startup order). Then it will attempt to restart the
   child and its siblings. This is done by starting processes synchronously, one by one, in the
   startup order. If all processes are started successfully, restart has succeeded.
@@ -192,7 +189,7 @@ defmodule Parent do
   self-terminates if maximum threshold (defaults to 3 restarts in 5 seconds) is exceeded.
 
   In addition, you can provide child specific thresholds by including `:max_restarts` and
-  `:max_seconds` options in child specification. Finally, note that `:max_restarts` can be set to
+  `:max_seconds` options in child specification. Note that `:max_restarts` can be set to
   `:infinity` (both for the parent and each child). This can be useful if you want to disable the
   parent global limit, and use child-specific limits.
 
