@@ -12,6 +12,65 @@ defmodule ParentTest do
     :ok
   end
 
+  describe "child_spec/2" do
+    defmodule TestChildSpec do
+      def child_spec(arg), do: %{start: {__MODULE__, :start_link, arg}}
+    end
+
+    test "expands module, passing empty list as the arg" do
+      expanded_spec = Parent.child_spec(TestChildSpec)
+      assert is_map(expanded_spec)
+      assert expanded_spec.start == {TestChildSpec, :start_link, []}
+    end
+
+    test "expands {module, opts}" do
+      expanded_spec = Parent.child_spec({TestChildSpec, :some_arg})
+      assert is_map(expanded_spec)
+      assert expanded_spec.start == {TestChildSpec, :start_link, :some_arg}
+    end
+
+    for {opt, default} <- [
+          binds_to: [],
+          ephemeral?: false,
+          id: nil,
+          max_restarts: :infinity,
+          max_seconds: 5000,
+          meta: nil,
+          restart: :permanent,
+          shutdown: 5000,
+          shutdown_group: nil,
+          timeout: :infinity,
+          type: :worker
+        ] do
+      test "sets #{opt} to #{inspect(default)} by default" do
+        spec = Parent.child_spec(%{start: fn -> :ok end})
+        assert Map.fetch!(spec, unquote(opt)) == unquote(default)
+      end
+    end
+
+    test "sets shutdown to infinity if the child is a supervisor" do
+      assert Parent.child_spec(%{start: fn -> :ok end, type: :supervisor}).shutdown == :infinity
+    end
+
+    test "sets shutdown to 5000 if the child is a worker" do
+      assert Parent.child_spec(%{start: fn -> :ok end, type: :worker}).shutdown == 5000
+    end
+
+    test "sets the default modules" do
+      assert Parent.child_spec({Agent, fn -> :ok end}).modules == [Agent]
+      assert Parent.child_spec(%{start: fn -> :ok end}).modules == [__MODULE__]
+    end
+
+    test "applies overrides on top of defaults" do
+      assert Parent.child_spec({Agent, fn -> :ok end}, shutdown: 0).shutdown == 0
+    end
+
+    test "succeeds if base spec doesn't contain the start spec" do
+      start = {Agent, :start_link, fn -> :ok end}
+      assert Parent.child_spec(%{}, start: start).start == start
+    end
+  end
+
   describe "initialize/0" do
     test "traps exists" do
       Process.flag(:trap_exit, false)

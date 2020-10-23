@@ -330,8 +330,9 @@ defmodule Parent do
   @spec child_spec(start_spec, Keyword.t() | child_spec) :: child_spec
   def child_spec(spec, overrides \\ []) do
     spec
-    |> expand_child_spec()
+    |> child_spec_to_map()
     |> Map.merge(Map.new(overrides))
+    |> expand_child_spec()
   end
 
   @spec parent_spec(Keyword.t() | child_spec) :: child_spec
@@ -593,8 +594,9 @@ defmodule Parent do
     end
   end
 
-  defp expand_child_spec(mod) when is_atom(mod), do: expand_child_spec({mod, []})
-  defp expand_child_spec({mod, arg}), do: expand_child_spec(mod.child_spec(arg))
+  defp child_spec_to_map(mod) when is_atom(mod), do: child_spec_to_map({mod, []})
+  defp child_spec_to_map({mod, arg}), do: mod.child_spec(arg)
+  defp child_spec_to_map(%{} = child_spec), do: child_spec
 
   defp expand_child_spec(%{} = child_spec) do
     default_spec()
