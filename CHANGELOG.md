@@ -1,3 +1,7 @@
+# 0.11.1
+
+- Fixes a crash in `Parent.child_spec/1`
+
 # 0.11.0
 
 ## Sumary
