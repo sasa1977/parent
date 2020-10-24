@@ -408,6 +408,17 @@ defmodule ParentTest do
       assert Parent.children() == []
     end
 
+    test "works if a bound child stopped previously" do
+      Parent.initialize()
+      start_child!(id: :child1)
+      start_child!(id: :child2, binds_to: [:child1])
+      start_child!(id: :child3, binds_to: [:child1])
+
+      {:ok, _} = Parent.shutdown_child(:child2)
+      assert {:ok, stopped_children} = Parent.shutdown_child(:child1)
+      assert Map.keys(stopped_children) == [:child1, :child3]
+    end
+
     test "fails if the parent is not initialized" do
       assert_raise RuntimeError, "Parent is not initialized", fn -> Parent.shutdown_child(1) end
     end

@@ -10,7 +10,7 @@ defmodule Parent.State do
             startup_index: non_neg_integer,
             restart_counter: RestartCounter.t(),
             registry?: boolean,
-            deps: %{key => [key]},
+            bound: %{key => [key]},
             shutdown_groups: %{Parent.shutdown_group() => [key]}
           }
 
@@ -37,7 +37,7 @@ defmodule Parent.State do
       startup_index: 0,
       restart_counter: RestartCounter.new(opts[:max_restarts], opts[:max_seconds]),
       registry?: Keyword.fetch!(opts, :registry?),
-      deps: %{},
+      bound: %{},
       shutdown_groups: %{}
     }
   end
@@ -165,7 +165,7 @@ defmodule Parent.State do
       state,
       fn child_ref, state ->
         bound = child!(state, child_ref)
-        %{state | deps: Map.update(state.deps, bound.key, [key], &[key | &1])}
+        %{state | bound: Map.update(state.bound, bound.key, [key], &[key | &1])}
       end
     )
   end
@@ -189,15 +189,15 @@ defmodule Parent.State do
 
   defp pop_child_and_bound_children(state, child_ref) do
     child = child!(state, child_ref)
-    children = child_with_deps(state, child)
+    children = child_with_bound_siblings(state, child)
     state = Enum.reduce(children, state, &remove_child(&2, &1))
     {children, state}
   end
 
-  defp child_with_deps(state, child),
-    do: Map.values(child_with_deps(state, child, %{}))
+  defp child_with_bound_siblings(state, child),
+    do: Map.values(child_with_bound_siblings(state, child, %{}))
 
-  defp child_with_deps(state, child, collected) do
+  defp child_with_bound_siblings(state, child, collected) do
     # collect all siblings in the same shutdown group
     group_children =
       if is_nil(child.spec.shutdown_group),
@@ -207,8 +207,8 @@ defmodule Parent.State do
     collected = Enum.reduce(group_children, collected, &Map.put_new(&2, &1.key, &1))
 
     for child <- group_children,
-        dep <- Map.get(state.deps, child.key, []),
-        bound_sibling = child!(state, dep),
+        bound_pid <- Map.get(state.bound, child.key, []),
+        bound_sibling = child!(state, bound_pid),
         sibling_key = bound_sibling.key,
         not Map.has_key?(collected, bound_sibling.key),
         reduce: collected do
@@ -216,7 +216,7 @@ defmodule Parent.State do
         collected
 
       collected ->
-        child_with_deps(
+        child_with_bound_siblings(
           state,
           bound_sibling,
           Map.put(collected, bound_sibling.key, bound_sibling)
@@ -230,7 +230,8 @@ defmodule Parent.State do
     state
     |> Map.update!(:id_to_key, &Map.delete(&1, child.spec.id))
     |> Map.update!(:children, &Map.delete(&1, child.key))
-    |> Map.update!(:deps, &Map.delete(&1, child.key))
+    |> Map.update!(:bound, &Map.delete(&1, child.key))
+    |> remove_child_from_bound(child)
     |> Map.update!(:shutdown_groups, fn
       groups ->
         with %{^group => children} <- groups do
@@ -240,5 +241,18 @@ defmodule Parent.State do
           end
         end
     end)
+  end
+
+  defp remove_child_from_bound(state, child) do
+    Enum.reduce(
+      child.spec.binds_to,
+      state,
+      fn dep, state ->
+        case child(state, dep) do
+          {:ok, dep_child} -> update_in(state.bound[dep_child.key], &(&1 -- [child.key]))
+          :error -> state
+        end
+      end
+    )
   end
 end
