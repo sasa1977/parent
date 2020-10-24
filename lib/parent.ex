@@ -597,15 +597,14 @@ defmodule Parent do
   defp child_spec_to_map(mod) when is_atom(mod), do: child_spec_to_map({mod, []})
   defp child_spec_to_map({mod, arg}), do: mod.child_spec(arg)
   defp child_spec_to_map(%{} = child_spec), do: child_spec
+  defp child_spec_to_map(_other), do: raise("invalid child_spec")
 
-  defp expand_child_spec(%{} = child_spec) do
+  defp expand_child_spec(child_spec) do
     default_spec()
     |> Map.merge(default_type_and_shutdown_spec(Map.get(child_spec, :type, :worker)))
     |> Map.put(:modules, default_modules(child_spec.start))
     |> Map.merge(child_spec)
   end
-
-  defp expand_child_spec(_other), do: raise("invalid child_spec")
 
   defp default_spec do
     %{
