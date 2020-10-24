@@ -1,3 +1,8 @@
+# 0.11.2
+
+- Properly cleans up stopped child from the internal state
+- Correctly updates bindings when a non-ephemeral child stops
+
 # 0.11.1
 
 - Fixes a crash in `Parent.child_spec/1`
