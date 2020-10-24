@@ -676,6 +676,25 @@ defmodule ParentTest do
       provoke_child_termination!(:child1, at: :timer.seconds(1))
       provoke_child_termination!(:child1, at: :timer.seconds(2))
     end
+
+    test "correctly updates pid-based bindings when the stopped non-ephemeral child is not restarted" do
+      Parent.initialize()
+
+      child1 =
+        start_child!(
+          id: :child1,
+          restart: :temporary,
+          start: {Task, :start_link, [fn -> :ok end]}
+        )
+
+      start_child!(id: :child2, binds_to: [child1])
+      start_child!(id: :child3, binds_to: [child1])
+
+      :ignore = handle_parent_message()
+
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
+      assert Map.keys(stopped_children) == [:child1, :child2, :child3]
+    end
   end
 
   describe "shutdown_all/1" do

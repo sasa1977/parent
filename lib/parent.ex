@@ -760,8 +760,7 @@ defmodule Parent do
         {ephemeral, non_ephemeral} =
           Enum.split_with([child | bound_siblings], & &1.spec.ephemeral?)
 
-        state =
-          Enum.reduce(non_ephemeral, state, &State.reregister_child(&2, &1, :undefined, nil))
+        state = Restart.perform(state, non_ephemeral, restart?: false)
 
         if ephemeral == [],
           do: {:ignore, state},

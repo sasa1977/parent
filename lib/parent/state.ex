@@ -76,7 +76,7 @@ defmodule Parent.State do
     |> update_shutdown_groups(key, spec)
   end
 
-  @spec register_child(t, pid, child, reference | nil) :: t
+  @spec register_child(t, pid, child, reference | nil) :: {key, t}
   def reregister_child(state, child, pid, timer_ref) do
     key = child_key(pid)
 
@@ -89,10 +89,11 @@ defmodule Parent.State do
         do: state,
         else: Map.update!(state, :id_to_key, &Map.put(&1, child.spec.id, key))
 
-    state
-    |> Map.update!(:children, &Map.put(&1, child.key, child))
-    |> update_bindings(key, child.spec)
-    |> update_shutdown_groups(key, child.spec)
+    {key,
+     state
+     |> Map.update!(:children, &Map.put(&1, child.key, child))
+     |> update_bindings(key, child.spec)
+     |> update_shutdown_groups(key, child.spec)}
   end
 
   @spec children(t) :: [child()]

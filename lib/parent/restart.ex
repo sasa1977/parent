@@ -3,16 +3,19 @@ defmodule Parent.Restart do
   alias Parent.State
 
   # core logic of all restarts, both automatic and manual
-  def perform(state, children) do
+  def perform(state, children, opts \\ []) do
     to_start =
       children
       # reject already started children (idempotence)
       |> Stream.reject(&State.child?(state, &1.spec.id))
       |> Enum.sort_by(& &1.startup_index)
 
-    {to_start, state} = record_restart(state, to_start)
+    {to_start, state} =
+      if Keyword.get(opts, :restart?, true),
+        do: record_restart(state, to_start),
+        else: {to_start, state}
 
-    {not_started, state, start_error} = return_children(state, to_start)
+    {not_started, state, start_error} = return_children(state, to_start, opts)
 
     if not_started == [],
       do: state,
@@ -44,18 +47,22 @@ defmodule Parent.Restart do
     end
   end
 
-  defp return_children(state, children, new_pids \\ %{})
+  defp return_children(state, children, opts, new_pids \\ %{})
 
-  defp return_children(state, [], _new_pids), do: {[], state, nil}
+  defp return_children(state, [], _opts, _new_pids), do: {[], state, nil}
 
-  defp return_children(state, [child | children], new_pids) do
+  defp return_children(state, [child | children], opts, new_pids) do
     child = update_bindings(child, new_pids)
 
-    case Parent.start_child_process(state, child.spec) do
+    start_result =
+      if Keyword.get(opts, :restart?, true),
+        do: Parent.start_child_process(state, child.spec),
+        else: {:ok, :undefined, nil}
+
+    case start_result do
       {:ok, new_pid, timer_ref} ->
-        state
-        |> State.reregister_child(child, new_pid, timer_ref)
-        |> return_children(children, Map.put(new_pids, child.pid, new_pid))
+        {key, state} = State.reregister_child(state, child, new_pid, timer_ref)
+        return_children(state, children, opts, Map.put(new_pids, child.key, key))
 
       {:error, start_error} ->
         # map remaining bindings
