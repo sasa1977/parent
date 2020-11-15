@@ -159,7 +159,7 @@ defmodule Parent do
 
     - a child terminated and it will be restarted due to its `:restart` setting
     - `restart_child/1` has been invoked (manual restart)
-    - `return_children/2` has been invoked (returning removed children)
+    - `return_children/1` has been invoked (returning removed children)
 
   In all these situations the flow is the same. Parent will first synchronously stop the bound
   dependencies of the child (in the reverse startup order). Then it will attempt to restart the
@@ -327,6 +327,12 @@ defmodule Parent do
           | {:missing_deps, [child_ref]}
           | {:non_uniform_shutdown_group, [shutdown_group]}
 
+  @doc """
+  Builds and overrides a child specification
+
+  This operation is similar to
+  [Supervisor.child_spec/1](https://hexdocs.pm/elixir/Supervisor.html#child_spec/2)
+  """
   @spec child_spec(start_spec, Keyword.t() | child_spec) :: child_spec
   def child_spec(spec, overrides \\ []) do
     spec
