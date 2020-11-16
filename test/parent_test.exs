@@ -503,14 +503,14 @@ defmodule ParentTest do
       Parent.restart_child(:child1)
 
       assert Parent.children() == []
-      assert_receive {:EXIT, pid, _}
+      assert_receive {:EXIT, _pid, _}
 
       succeed_on_child_start(:child1)
       raise_on_child_start(:child2)
 
       assert handle_parent_message() == :ignore
       assert [%{id: :child1}] = Parent.children()
-      assert_receive {:EXIT, pid, _}
+      assert_receive {:EXIT, _pid, _}
 
       succeed_on_child_start(:child2)
       assert handle_parent_message() == :ignore
@@ -1154,7 +1154,7 @@ defmodule ParentTest do
   end
 
   defp handle_parent_message,
-    do: Parent.handle_message(assert_receive message)
+    do: Parent.handle_message(assert_receive _message)
 
   defp provoke_child_termination!(child_id, opts \\ []) do
     now_ms = Keyword.get(opts, :at, 0)

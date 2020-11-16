@@ -74,7 +74,7 @@ defmodule Parent.GenServerTest do
     assert_receive {:trace, ^server, :call,
                     {Parent.TestServer, :handle_stopped_children, [info, :initial_state]}}
 
-    assert %{child: %{pid: pid, meta: meta, exit_reason: killed}} = info
+    assert %{child: %{pid: ^child, meta: :meta, exit_reason: :killed}} = info
   end
 
   test "restarts the child automatically" do

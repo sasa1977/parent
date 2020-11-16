@@ -165,7 +165,7 @@ defmodule Parent.ClientTest do
         spec =
           child_spec(id: :child2, start: {Agent, :start_link, [fn -> raise "some error" end]})
 
-        assert {:error, {error, _stacktrace}} = Client.start_child(parent, spec)
+        {:error, {_error, _stacktrace}} = Client.start_child(parent, spec)
         Process.sleep(100)
       end)
 
