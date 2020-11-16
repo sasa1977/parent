@@ -721,6 +721,9 @@ defmodule Parent do
     {:ignore, state}
   end
 
+  defp do_handle_message(state, {__MODULE__, :stopped_children, children}),
+    do: handle_stopped_children(state, hd(children), tl(children), hd(children).exit_reason)
+
   defp do_handle_message(state, {:"$gen_call", client, :which_children}) do
     GenServer.reply(client, supervisor_which_children())
     {:ignore, state}
@@ -750,6 +753,10 @@ defmodule Parent do
 
     stop_children(bound_siblings, :shutdown)
 
+    handle_stopped_children(state, child, bound_siblings, reason)
+  end
+
+  defp handle_stopped_children(state, child, bound_siblings, reason) do
     cond do
       child.spec.restart == :permanent or (child.spec.restart == :transient and reason != :normal) ->
         state = Restart.perform(state, [child | bound_siblings])
@@ -783,6 +790,10 @@ defmodule Parent do
       )
     end
   end
+
+  @doc false
+  def notify_stopped_children(children),
+    do: send(self(), {Parent, :stopped_children, children})
 
   defp stopped_children(children),
     do: Enum.into(children, %{}, &{with(nil <- &1.spec.id, do: &1.pid), &1})

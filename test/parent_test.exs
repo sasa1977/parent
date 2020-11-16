@@ -1096,6 +1096,55 @@ defmodule ParentTest do
                ~w/child1 child2 child3 child4 child5 child6/a
     end
 
+    test "treats failed start of an ephemeral temporary child as a crash" do
+      Parent.initialize()
+
+      start_child!(id: :child1)
+      start_child!(id: :child2, binds_to: [:child1], restart: :temporary, ephemeral?: true)
+      start_child!(id: :child3, shutdown_group: :group1)
+      start_child!(id: :child4, shutdown_group: :group1, binds_to: [:child2])
+      start_child!(id: :child5, binds_to: [:child1])
+
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
+
+      raise_on_child_start(:child2)
+      assert Parent.return_children(stopped_children) == :ok
+      assert_receive {:EXIT, _, _}
+
+      assert Enum.map(Parent.children(), & &1.id) == ~w/child1/a
+
+      assert {:stopped_children, stopped_children} = handle_parent_message()
+      assert Map.keys(stopped_children) == ~w/child2 child3 child4/a
+
+      assert handle_parent_message() == :ignore
+      assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child5/a
+    end
+
+    test "treats failed start of a non-ephemeral temporary child as a crash" do
+      Parent.initialize()
+
+      start_child!(id: :child1)
+      start_child!(id: :child2, binds_to: [:child1], restart: :temporary, ephemeral?: false)
+      start_child!(id: :child3, shutdown_group: :group1)
+      start_child!(id: :child4, shutdown_group: :group1, binds_to: [:child2])
+      start_child!(id: :child5, binds_to: [:child1])
+
+      {:ok, stopped_children} = Parent.shutdown_child(:child1)
+
+      raise_on_child_start(:child2)
+      assert Parent.return_children(stopped_children) == :ok
+      assert_receive {:EXIT, _, _}
+
+      assert Enum.map(Parent.children(), & &1.id) == ~w/child1/a
+
+      # full return happens after two messages, one for the stopped children, another for the restarted ones
+      assert handle_parent_message() == :ignore
+      assert handle_parent_message() == :ignore
+      assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2 child3 child4 child5/a
+
+      Enum.each(~w/child2 child3 child4/a, &assert(Parent.child_pid(&1) == {:ok, :undefined}))
+    end
+
     test "is idempotent" do
       Parent.initialize()
       start_child!(id: :child1)

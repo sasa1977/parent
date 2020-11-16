@@ -19,7 +19,7 @@ defmodule Parent.Restart do
 
     if not_started == [],
       do: state,
-      else: enqueue_resume_restart(state, not_started, start_error)
+      else: handle_not_started_children(state, not_started, start_error)
   end
 
   defp record_restart(state, children) do
@@ -114,19 +114,54 @@ defmodule Parent.Restart do
     {children_to_stop, state}
   end
 
-  defp enqueue_resume_restart(state, not_started, start_error) do
+  defp handle_not_started_children(state, not_started, start_error) do
     # stop successfully started children which are bound to non-started ones
     {extra_stopped_children, state} =
       stop_children_in_shutdown_groups(state, shutdown_groups(not_started))
 
-    [failed_child | other_children] = not_started
+    failed_child = Map.merge(hd(not_started), %{exit_reason: start_error, record_restart?: true})
 
-    [other_children, extra_stopped_children]
-    |> Stream.concat()
-    |> Stream.map(&Map.put(&1, :exit_reason, :shutdown))
-    |> Stream.concat([Map.merge(failed_child, %{exit_reason: start_error, record_restart?: true})])
-    |> Parent.enqueue_resume_restart()
+    other_children =
+      [tl(not_started), extra_stopped_children]
+      |> Stream.concat()
+      |> Enum.map(&Map.put(&1, :exit_reason, :shutdown))
+
+    children_to_restart =
+      if failed_child.spec.restart == :temporary,
+        do: handle_start_error(failed_child, other_children),
+        else: [failed_child | other_children]
+
+    Parent.enqueue_resume_restart(children_to_restart)
 
     state
+  end
+
+  defp handle_start_error(failed_child, other_children) do
+    {failed_children, children_to_restart} =
+      Enum.reduce(
+        other_children,
+        {[failed_child], []},
+        fn child, {failed_children, children_to_restart} ->
+          if Enum.any?(failed_children, &bound_to?(child, &1)) do
+            # we need to recheck children we already processed to see if any of them is bound to
+            # this child
+            {extra_failed_children, children_to_restart} =
+              Enum.split_with(children_to_restart, &bound_to?(&1, child))
+
+            {[child | extra_failed_children ++ failed_children], children_to_restart}
+          else
+            {failed_children, [child | children_to_restart]}
+          end
+        end
+      )
+
+    Parent.notify_stopped_children(Enum.reverse(failed_children))
+    children_to_restart
+  end
+
+  defp bound_to?(child1, child2) do
+    (not is_nil(child1.spec.shutdown_group) and
+       child1.spec.shutdown_group == child2.spec.shutdown_group) or
+      Enum.any?(child1.spec.binds_to, &(&1 in [child2.spec.id, child2.pid]))
   end
 end
