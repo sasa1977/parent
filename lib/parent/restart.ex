@@ -4,22 +4,25 @@ defmodule Parent.Restart do
 
   # core logic of all restarts, both automatic and manual
   def perform(state, children, opts \\ []) do
-    to_start =
-      children
-      # reject already started children (idempotence)
-      |> Stream.reject(&State.child?(state, &1.spec.id))
-      |> Enum.sort_by(& &1.startup_index)
+    # Reject already started children (idempotence)
+    to_start = Enum.reject(children, &State.child?(state, &1.spec.id))
 
     {to_start, state} =
       if Keyword.get(opts, :restart?, true),
         do: record_restart(state, to_start),
         else: {to_start, state}
 
-    {not_started, state, start_error} = return_children(state, to_start, opts)
+    # First we'll return all entries to the parent without starting the processes. This will
+    # simplify handling a failed start of some child.
+    {children, state} = return_children_entries(state, to_start)
 
-    if not_started == [],
-      do: state,
-      else: handle_not_started_children(state, not_started, start_error)
+    # Now we can proceed to restart the children if needed
+    if Keyword.get(opts, :restart?, true) do
+      {not_started, state} = restart_children(state, children)
+      Enum.reduce(not_started, state, &handle_not_started(&2, &1))
+    else
+      state
+    end
   end
 
   defp record_restart(state, children) do
@@ -47,121 +50,95 @@ defmodule Parent.Restart do
     end
   end
 
-  defp return_children(state, children, opts, new_pids \\ %{})
+  defp return_children_entries(state, children) do
+    {state, _keys, children} =
+      children
+      |> Enum.sort_by(& &1.startup_index)
+      |> Enum.reduce(
+        {state, %{}, []},
+        fn child, {state, keys, children} ->
+          # if a child binds to a sibling via a pid we need to update the bindings to the correct key
+          child =
+            update_in(child.spec.binds_to, fn binds_to ->
+              Enum.map(binds_to, &Map.get(keys, &1, &1))
+            end)
 
-  defp return_children(state, [], _opts, _new_pids), do: {[], state, nil}
+          {key, state} =
+            State.reregister_child(
+              state,
+              child |> Map.delete(:exit_reason) |> Map.delete(:record_restart?),
+              :undefined,
+              nil
+            )
 
-  defp return_children(state, [child | children], opts, new_pids) do
-    child = update_bindings(child, new_pids)
+          keys = Map.put(keys, child.key, key)
+          child = Map.merge(child, State.child!(state, key))
+          {state, keys, [child | children]}
+        end
+      )
 
-    start_result =
-      if Keyword.get(opts, :restart?, true),
-        do: Parent.start_child_process(state, child.spec),
-        else: {:ok, :undefined, nil}
+    {Enum.reverse(children), state}
+  end
 
-    case start_result do
-      {:ok, new_pid, timer_ref} ->
-        {key, state} = State.reregister_child(state, child, new_pid, timer_ref)
-        return_children(state, children, opts, Map.put(new_pids, child.key, key))
+  defp restart_children(state, children) do
+    {stopped, state} =
+      Enum.reduce(
+        children,
+        {[], state},
+        fn child, {stopped, state} ->
+          {new_stopped, state} =
+            if State.child?(state, child.key),
+              do: restart_child(state, child),
+              # A child might not be in a state if it was removed because its dependency failed to start
+              else: {[], state}
+
+          {new_stopped ++ stopped, state}
+        end
+      )
+
+    {Enum.reverse(stopped), state}
+  end
+
+  defp restart_child(state, child) do
+    case Parent.start_validated_child(state, child.spec) do
+      {:ok, pid, timer_ref} ->
+        {[], State.set_child_process(state, child.key, pid, timer_ref)}
 
       {:error, start_error} ->
-        # map remaining bindings
-        children = Enum.map(children, &update_bindings(&1, new_pids))
-        {[child | children], state, start_error}
+        {:ok, children, state} = State.pop_child_with_bound_siblings(state, child.key)
+        Parent.stop_children(children, :shutdown)
+        {[{child.key, start_error, children}], state}
     end
   end
 
-  defp update_bindings(child, new_pids) do
-    # if a child binds to a sibling via pid we need to update the bindings to reflect new pids
-    update_in(
-      child.spec.binds_to,
-      fn binds_to -> Enum.map(binds_to, &Map.get(new_pids, &1, &1)) end
-    )
-  end
+  defp handle_not_started(state, {key, error, children}) do
+    {[failed_child], bound_siblings} = Enum.split_with(children, &(&1.key == key))
+    failed_child = Map.merge(failed_child, %{exit_reason: error, record_restart?: true})
 
-  defp shutdown_groups(children) do
-    for child <- children,
-        shutdown_group = child.spec.shutdown_group,
-        not is_nil(shutdown_group),
-        into: MapSet.new(),
-        do: shutdown_group
-  end
+    cond do
+      failed_child.spec.restart != :temporary ->
+        # Failed start of a non-temporary -> auto restart
+        {children, state} = return_children_entries(state, [failed_child | bound_siblings])
+        Parent.enqueue_resume_restart(children)
+        state
 
-  defp stop_children_in_shutdown_groups(state, shutdown_groups) do
-    {children_to_stop, state} =
-      Enum.reduce(
-        shutdown_groups,
-        {[], state},
-        fn group, {stopped, state} ->
-          state
-          |> State.children()
-          |> Enum.find(&(&1.spec.shutdown_group == group))
-          |> case do
-            nil ->
-              {stopped, state}
+      failed_child.spec.ephemeral? ->
+        # Failed start of a temporary ephemeral child -> notify the client about stopped children
+        Parent.notify_stopped_children([failed_child | bound_siblings])
+        state
 
-            child ->
-              {:ok, children, state} = State.pop_child_with_bound_siblings(state, child.pid)
-              {[children | stopped], state}
-          end
-        end
-      )
+      true ->
+        # Failed start of a temporary non-ephemeral child
 
-    children_to_stop =
-      children_to_stop |> List.flatten() |> Enum.sort_by(& &1.startup_index, :desc)
+        {ephemeral, non_ephemeral} =
+          Enum.split_with([failed_child | bound_siblings], & &1.spec.ephemeral?)
 
-    Parent.stop_children(children_to_stop, :shutdown)
-    {children_to_stop, state}
-  end
+        # non-ephemeral processes in the group are kept with their pid set to `:undefined`
+        {_children, state} = return_children_entries(state, non_ephemeral)
 
-  defp handle_not_started_children(state, not_started, start_error) do
-    # stop successfully started children which are bound to non-started ones
-    {extra_stopped_children, state} =
-      stop_children_in_shutdown_groups(state, shutdown_groups(not_started))
-
-    failed_child = Map.merge(hd(not_started), %{exit_reason: start_error, record_restart?: true})
-
-    other_children =
-      [tl(not_started), extra_stopped_children]
-      |> Stream.concat()
-      |> Enum.map(&Map.put(&1, :exit_reason, :shutdown))
-
-    children_to_restart =
-      if failed_child.spec.restart == :temporary,
-        do: handle_start_error(failed_child, other_children),
-        else: [failed_child | other_children]
-
-    Parent.enqueue_resume_restart(children_to_restart)
-
-    state
-  end
-
-  defp handle_start_error(failed_child, other_children) do
-    {failed_children, children_to_restart} =
-      Enum.reduce(
-        other_children,
-        {[failed_child], []},
-        fn child, {failed_children, children_to_restart} ->
-          if Enum.any?(failed_children, &bound_to?(child, &1)) do
-            # we need to recheck children we already processed to see if any of them is bound to
-            # this child
-            {extra_failed_children, children_to_restart} =
-              Enum.split_with(children_to_restart, &bound_to?(&1, child))
-
-            {[child | extra_failed_children ++ failed_children], children_to_restart}
-          else
-            {failed_children, [child | children_to_restart]}
-          end
-        end
-      )
-
-    Parent.notify_stopped_children(Enum.reverse(failed_children))
-    children_to_restart
-  end
-
-  defp bound_to?(child1, child2) do
-    (not is_nil(child1.spec.shutdown_group) and
-       child1.spec.shutdown_group == child2.spec.shutdown_group) or
-      Enum.any?(child1.spec.binds_to, &(&1 in [child2.spec.id, child2.pid]))
+        # notify the client about stopped ephemeral children
+        Parent.notify_stopped_children(ephemeral)
+        state
+    end
   end
 end

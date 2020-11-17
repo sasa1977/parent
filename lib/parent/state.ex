@@ -18,7 +18,7 @@ defmodule Parent.State do
 
   @type child :: %{
           spec: Parent.child_spec(),
-          pid: pid,
+          pid: pid | :undefined,
           timer_ref: reference() | nil,
           startup_index: non_neg_integer(),
           restart_counter: RestartCounter.t(),
@@ -48,9 +48,9 @@ defmodule Parent.State do
   @spec registry?(t) :: boolean
   def registry?(state), do: state.registry?
 
-  @spec register_child(t, pid, Parent.child_spec(), reference | nil) :: t
+  @spec register_child(t, pid | :undefined, Parent.child_spec(), reference | nil) :: t
   def register_child(state, pid, spec, timer_ref) do
-    key = child_key(pid)
+    key = child_key(%{}, pid)
 
     false = Map.has_key?(state.children, pid)
 
@@ -76,9 +76,9 @@ defmodule Parent.State do
     |> update_shutdown_groups(key, spec)
   end
 
-  @spec register_child(t, pid, child, reference | nil) :: {key, t}
+  @spec reregister_child(t, child, pid | :undefined, reference | nil) :: {key, t}
   def reregister_child(state, child, pid, timer_ref) do
-    key = child_key(pid)
+    key = child_key(child, pid)
 
     false = Map.has_key?(state.children, pid)
 
@@ -120,7 +120,7 @@ defmodule Parent.State do
   @spec num_children(t) :: non_neg_integer
   def num_children(state), do: Enum.count(state.children)
 
-  @spec child(t, Parent.child_ref()) :: {:ok, child} | :error
+  @spec child(t, Parent.child_ref() | key) :: {:ok, child} | :error
   def child(_state, nil), do: :error
   def child(state, {__MODULE__, _ref} = key), do: Map.fetch(state.children, key)
   def child(state, pid) when is_pid(pid), do: Map.fetch(state.children, pid)
@@ -157,8 +157,35 @@ defmodule Parent.State do
          do: {:ok, child.meta, state}
   end
 
-  defp child_key(:undefined), do: {__MODULE__, make_ref()}
-  defp child_key(pid) when is_pid(pid), do: pid
+  @spec set_child_process(t, Parent.child_ref(), pid | :undefined, reference) :: t
+  def set_child_process(state, child_ref, new_pid, new_timer_ref) do
+    child = child!(state, child_ref)
+    {:ok, children, state} = pop_child_with_bound_siblings(state, child.key)
+
+    new_key = if is_pid(new_pid), do: new_pid, else: child.key
+
+    children
+    |> Enum.sort_by(& &1.startup_index)
+    |> Enum.reduce(
+      state,
+      fn new_child, state ->
+        new_child =
+          update_in(new_child.spec.binds_to, fn binds_to ->
+            Enum.map(binds_to, &Map.get(%{child.key => new_key}, &1, &1))
+          end)
+
+        pid = if new_child.key == child.key, do: new_pid, else: new_child.pid
+        timer_ref = if new_child.key == child.key, do: new_timer_ref, else: new_child.timer_ref
+
+        {_, state} = reregister_child(state, new_child, pid, timer_ref)
+        state
+      end
+    )
+  end
+
+  defp child_key(_, pid) when is_pid(pid), do: pid
+  defp child_key(%{key: {__MODULE__, _} = key}, :undefined), do: key
+  defp child_key(_, :undefined), do: {__MODULE__, make_ref()}
 
   defp update_bindings(state, key, child_spec) do
     Enum.reduce(

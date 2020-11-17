@@ -166,17 +166,18 @@ defmodule Parent do
   child and its siblings. This is done by starting processes synchronously, one by one, in the
   startup order. If all processes are started successfully, restart has succeeded.
 
-  If some process fails to start, the parent won't try to start younger siblings. If some of the
-  successfully started children are bound to non-started siblings, they will be taken down as well.
-  This happens because parent won't permit the state which doesn't conform to the binding
-  requirements.
+  If some process fails to start, the parent treats it as a crash. It will take down all the
+  bound siblings, while proceeding to start other children which are not depending on the failed
+  process.
 
   Therefore, a restart may partially succeed, with some children not being started. In this case,
-  the parent will retry to restart the remaining children.
+  the parent will retry to restart such children, according to their specification. Temporary
+  children which fail to restart will be considered as stopped, and parent will not attempt to
+  restart them again.
 
-  An attempt to restart a child which failed to restart is considered as a crash and contributes to
-  the restart intensity. Thus, if a child repeatedly fails to restart, the parent will give up at
-  some point, according to restart intensity settings.
+  A failed attempt to restart a child is considered as a crash and contributes to the restart
+  intensity. Thus, if a child repeatedly fails to restart, the parent will give up at some point,
+  according to restart intensity settings.
 
   The restarted children keep their original startup order with respect to non-restarted children.
   For example, suppose that four children are running: A, B, C, and D, and children B and D are
@@ -634,26 +635,29 @@ defmodule Parent do
   defp default_modules(fun) when is_function(fun),
     do: [fun |> :erlang.fun_info() |> Keyword.fetch!(:module)]
 
+  defp start_child_process(state, child_spec) do
+    with :ok <- validate_spec(state, child_spec),
+         do: start_validated_child(state, child_spec)
+  end
+
   @doc false
-  def start_child_process(state, child_spec) do
-    with :ok <- validate_spec(state, child_spec) do
-      case invoke_start_function(child_spec.start) do
-        :ignore ->
-          {:ok, :undefined, nil}
+  def start_validated_child(state, child_spec) do
+    case invoke_start_function(child_spec.start) do
+      :ignore ->
+        {:ok, :undefined, nil}
 
-        {:ok, pid} ->
-          timer_ref =
-            case child_spec.timeout do
-              :infinity -> nil
-              timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
-            end
+      {:ok, pid} ->
+        timer_ref =
+          case child_spec.timeout do
+            :infinity -> nil
+            timeout -> Process.send_after(self(), {__MODULE__, :child_timeout, pid}, timeout)
+          end
 
-          if State.registry?(state), do: Registry.register(pid, child_spec)
-          {:ok, pid, timer_ref}
+        if State.registry?(state), do: Registry.register(pid, child_spec)
+        {:ok, pid, timer_ref}
 
-        {:error, _} = error ->
-          error
-      end
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -717,7 +721,21 @@ defmodule Parent do
   end
 
   defp do_handle_message(state, {__MODULE__, :resume_restart, stopped_children}) do
-    state = Restart.perform(state, Map.values(stopped_children))
+    state =
+      stopped_children
+      |> Enum.reduce(
+        state,
+        fn child, state ->
+          if State.child?(state, child.key) do
+            {:ok, _, state} = State.pop_child_with_bound_siblings(state, child.key)
+            state
+          else
+            state
+          end
+        end
+      )
+      |> Restart.perform(stopped_children)
+
     {:ignore, state}
   end
 
@@ -784,16 +802,13 @@ defmodule Parent do
   def enqueue_resume_restart(children_to_restart) do
     unless Enum.empty?(children_to_restart) do
       # some children have not been started -> defer auto-restart to later moment
-      send(
-        self(),
-        {Parent, :resume_restart, stopped_children(children_to_restart)}
-      )
+      send(self(), {__MODULE__, :resume_restart, children_to_restart})
     end
   end
 
   @doc false
   def notify_stopped_children(children),
-    do: send(self(), {Parent, :stopped_children, children})
+    do: send(self(), {__MODULE__, :stopped_children, children})
 
   defp stopped_children(children),
     do: Enum.into(children, %{}, &{with(nil <- &1.spec.id, do: &1.pid), &1})

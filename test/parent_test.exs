@@ -501,19 +501,15 @@ defmodule ParentTest do
 
       raise_on_child_start(:child1)
       Parent.restart_child(:child1)
-
-      assert Parent.children() == []
       assert_receive {:EXIT, _pid, _}
 
       succeed_on_child_start(:child1)
       raise_on_child_start(:child2)
 
       assert handle_parent_message() == :ignore
-      assert [%{id: :child1}] = Parent.children()
       assert_receive {:EXIT, _pid, _}
 
       succeed_on_child_start(:child2)
-      assert handle_parent_message() == :ignore
       assert [%{id: :child1}, %{id: :child2}] = Parent.children()
     end
 
@@ -1072,28 +1068,35 @@ defmodule ParentTest do
       assert [pid1, pid2, pid3] == [child3, child2, child1]
     end
 
-    test "returns successfully started processes, trying to restart other automatically" do
+    test "tries to restart non-started processes automatically" do
       Parent.initialize()
-      start_child!(id: :child1)
-      start_child!(id: :child2, binds_to: [:child1])
-      start_child!(id: :child3, binds_to: [:child1], shutdown_group: :group1)
+
+      child1 = start_child!(id: :child1)
+      start_child!(id: :child2, binds_to: [child1])
+      child3 = start_child!(id: :child3, binds_to: [child1], shutdown_group: :group1)
       start_child!(id: :child4, shutdown_group: :group1)
-      start_child!(id: :child5, binds_to: [:child3])
+      start_child!(id: :child5, binds_to: [child3])
       start_child!(id: :child6, binds_to: [:child5], shutdown_group: :group1)
 
-      {:ok, stopped_children} = Parent.shutdown_child(:child1)
-      raise_on_child_start(:child5)
+      # running this multiple times to make sure all bindings are correctly preserved
+      for _ <- 1..5 do
+        {:ok, stopped_children} = Parent.shutdown_child(:child1)
 
-      assert Parent.return_children(stopped_children) == :ok
-      assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2/a
+        raise_on_child_start(:child5)
+        assert Parent.return_children(stopped_children) == :ok
+        assert_receive {:EXIT, _failed_child5, _}
 
-      succeed_on_child_start(:child5)
-      # happens when the process crashes during its start
-      assert_receive {:EXIT, _, _}
-      assert handle_parent_message() == :ignore
+        assert Enum.map(Parent.children(), & &1.id) ==
+                 ~w/child1 child2 child3 child4 child5 child6/a
 
-      assert Enum.map(Parent.children(), & &1.id) ==
-               ~w/child1 child2 child3 child4 child5 child6/a
+        Enum.each(~w/child1 child2/a, &assert(is_pid(child_pid!(&1))))
+        Enum.each(~w/child3 child4 child5 child6/a, &assert(child_pid!(&1) == :undefined))
+
+        succeed_on_child_start(:child5)
+        assert handle_parent_message() == :ignore
+
+        Enum.each(~w/child3 child4 child5 child6/a, &assert(is_pid(child_pid!(&1))))
+      end
     end
 
     test "treats failed start of an ephemeral temporary child as a crash" do
@@ -1111,13 +1114,10 @@ defmodule ParentTest do
       assert Parent.return_children(stopped_children) == :ok
       assert_receive {:EXIT, _, _}
 
-      assert Enum.map(Parent.children(), & &1.id) == ~w/child1/a
+      assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child5/a
 
       assert {:stopped_children, stopped_children} = handle_parent_message()
       assert Map.keys(stopped_children) == ~w/child2 child3 child4/a
-
-      assert handle_parent_message() == :ignore
-      assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child5/a
     end
 
     test "treats failed start of a non-ephemeral temporary child as a crash" do
@@ -1135,13 +1135,7 @@ defmodule ParentTest do
       assert Parent.return_children(stopped_children) == :ok
       assert_receive {:EXIT, _, _}
 
-      assert Enum.map(Parent.children(), & &1.id) == ~w/child1/a
-
-      # full return happens after two messages, one for the stopped children, another for the restarted ones
-      assert handle_parent_message() == :ignore
-      assert handle_parent_message() == :ignore
       assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2 child3 child4 child5/a
-
       Enum.each(~w/child2 child3 child4/a, &assert(Parent.child_pid(&1) == {:ok, :undefined}))
     end
 
