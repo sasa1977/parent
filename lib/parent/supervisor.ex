@@ -19,7 +19,7 @@ defmodule Parent.Supervisor do
       defmodule MySupervisor do
         use Parent.Supervisor
 
-        def start_link(children, options),
+        def start_link({children, options}),
           do: Parent.Supervisor.start_link(children, options)
 
         # ...
