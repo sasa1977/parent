@@ -65,7 +65,7 @@ defmodule PeriodicTest do
   test "timeout" do
     {_scheduler, job} = start_job!(timeout: 1)
     mref = Process.monitor(job)
-    assert_receive({:DOWN, ^mref, :process, ^job, :killed})
+    assert_receive({:DOWN, ^mref, :process, ^job, :timeout})
   end
 
   describe "initial_delay" do

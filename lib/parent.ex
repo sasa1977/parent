@@ -201,8 +201,9 @@ defmodule Parent do
   ## Child timeout
 
   You can optionally include the `:timeout` option in the child specification to ask the parent to
-  terminate the child if it doesn't stop in the given time. In this case, the child's shutdown
-  strategy is ignore, and the child will be forcefully terminated (using the `:kill` exit signal).
+  terminate the child if it doesn't stop in the given time. The child will be terminated according
+  to its shutdown specification. In the case of non-forceful termination, the `:timeout` exit
+  signal will be used.
 
   A non-temporary child which timeouts will be restarted.
 
@@ -716,7 +717,7 @@ defmodule Parent do
 
   defp do_handle_message(state, {__MODULE__, :child_timeout, pid}) do
     child = State.child!(state, pid)
-    stop_child(child, :kill)
+    stop_child(child, :timeout)
     handle_child_down(state, child, :timeout)
   end
 

@@ -1,3 +1,9 @@
+# 0.12.0
+
+## Breaking changes
+
+- A child which times out (according to its `:timeout` setting) is terminated according to its shutdown specification, using the `:timeout` exit reason for non-forceful termination. Previously timed out children were always forcefully terminated.
+
 # 0.11.2
 
 - Properly cleans up stopped child from the internal state

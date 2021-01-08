@@ -75,8 +75,7 @@ defmodule Periodic do
       - `:ignore` - don't start the new job if the previous instance is still running
       - `:stop_previous` - stop the previous instance before starting the new one
   - `:timeout` - Defines the maximum running time of the job. If the job doesn't finish in the
-    given time, it is forcefully terminated. In this case, the job's shutdown specification is
-    ignored. Defaults to `:infinity`
+    given time, it is terminated according to its shutdown specification. Defaults to `:infinity`.
   - `:job_shutdown` - Shutdown value of the job process. See the "Shutdown" section
     for details.
   - `:id` - Supervisor child id of the scheduler process. Defaults to `Periodic`. If you plan on
