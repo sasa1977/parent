@@ -623,6 +623,22 @@ defmodule ParentTest do
                Parent.children()
     end
 
+    test "of an anonymous child also takes down anonymous bound siblings" do
+      Parent.initialize()
+
+      child1 = start_child!(restart: :temporary)
+      child2 = start_child!(restart: :temporary, binds_to: [child1])
+      child3 = start_child!(restart: :temporary, binds_to: [child2])
+
+      Process.monitor(child2)
+      Process.monitor(child3)
+
+      provoke_child_termination!(child1)
+
+      assert_receive {:DOWN, _mref, :process, ^child2, :shutdown}
+      assert_receive {:DOWN, _mref, :process, ^child3, :shutdown}
+    end
+
     test "takes down the entire parent on too many restarts" do
       Parent.initialize(max_restarts: 2)
 

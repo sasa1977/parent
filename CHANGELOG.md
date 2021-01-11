@@ -4,6 +4,10 @@
 
 - A child which times out (according to its `:timeout` setting) is terminated according to its shutdown specification, using the `:timeout` exit reason for non-forceful termination. Previously timed out children were always forcefully terminated.
 
+## Bug fixes
+
+- Correctly takes down anonymous bound siblings of an anonymous child
+
 # 0.11.2
 
 - Properly cleans up stopped child from the internal state

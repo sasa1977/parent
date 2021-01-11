@@ -767,7 +767,7 @@ defmodule Parent do
 
     bound_siblings =
       children
-      |> Stream.reject(&(&1.spec.id == child.spec.id))
+      |> Stream.reject(&(&1.key == child.key))
       |> Enum.map(&Map.put(&1, :exit_reason, :shutdown))
 
     stop_children(bound_siblings, :shutdown)
