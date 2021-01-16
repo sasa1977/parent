@@ -38,12 +38,12 @@ Parent.Supervisor.start_link(
 Parent.Supervisor.start_link(
   [
     Parent.child_spec(Child1),
-    Parent.child_spec(Child2, bind_to: [Child1]),
-    Parent.child_spec(Child3, bind_to: [Child1]),
+    Parent.child_spec(Child2, binds_to: [Child1]),
+    Parent.child_spec(Child3, binds_to: [Child1]),
     Parent.child_spec(Child4, shutdown_group: :children4_to_6),
     Parent.child_spec(Child5, shutdown_group: :children4_to_6),
     Parent.child_spec(Child6, shutdown_group: :children4_to_6),
-    Parent.child_spec(Child7, bind_to: [Child1]),
+    Parent.child_spec(Child7, binds_to: [Child1]),
   ]
 )
 ```
@@ -58,7 +58,7 @@ Parent.Supervisor.start_link(
 Parent.Supervisor.start_link(
   [
     Parent.child_spec(Child1),
-    Parent.child_spec(Child2, bind_to: [Child1]),
+    Parent.child_spec(Child2, binds_to: [Child1]),
     # ...
   ]
 )
