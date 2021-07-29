@@ -29,7 +29,7 @@ defmodule Parent.MixProject do
       {:dialyxir, "~> 0.5", runtime: false, only: [:dev, :test]},
       {:ex_doc, "~> #{ex_doc_version()}", only: :dev, runtime: false},
       {:mox, "~> 0.5.0", only: :test},
-      {:telemetry, "~> 0.4"}
+      {:telemetry, "~> 0.4 or ~> 1.0"}
     ]
   end
 
