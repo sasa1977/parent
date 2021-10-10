@@ -78,15 +78,11 @@ defmodule Periodic.Test do
   defp attach_telemetry_handler(telemetry_id, event) do
     handler_id = make_ref()
     event_name = [Periodic, telemetry_id, event]
-    :telemetry.attach(handler_id, event_name, telemetry_handler(event_name), nil)
+    :telemetry.attach(handler_id, event_name, &__MODULE__.telemetry_handler/4, self())
     ExUnit.Callbacks.on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  defp telemetry_handler(event_name) do
-    test_pid = self()
-
-    fn [Periodic, telemetry_id, event] = ^event_name, measurements, metadata, nil ->
-      send(test_pid, {__MODULE__, telemetry_id, event, metadata, measurements})
-    end
-  end
+  @doc false
+  def telemetry_handler([Periodic, telemetry_id, event], measurements, metadata, test_pid),
+    do: send(test_pid, {__MODULE__, telemetry_id, event, metadata, measurements})
 end

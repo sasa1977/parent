@@ -15,10 +15,11 @@ defmodule Periodic.Logger do
   defp attach_telemetry_handler(telemetry_id, event) do
     handler_id = make_ref()
     event_name = [Periodic, telemetry_id, event]
-    :telemetry.attach(handler_id, event_name, &telemetry_handler/4, nil)
+    :telemetry.attach(handler_id, event_name, &__MODULE__.telemetry_handler/4, nil)
   end
 
-  defp telemetry_handler([Periodic, telemetry_id, event], measurements, meta, nil) do
+  @doc false
+  def telemetry_handler([Periodic, telemetry_id, event], measurements, meta, nil) do
     Logger.log(log_level(event, meta), message(telemetry_id, event, measurements, meta))
   end
 
