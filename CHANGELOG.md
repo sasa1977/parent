@@ -1,3 +1,7 @@
+# 0.12.1
+
+- relax telemetry dep requirement
+
 # 0.12.0
 
 ## Breaking changes
