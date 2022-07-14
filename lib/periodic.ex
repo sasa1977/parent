@@ -356,6 +356,10 @@ defmodule Periodic do
     end
   end
 
+  def handle_call({:tick, _opts}, _from, state) do
+    {:reply, {:error, :not_in_manual_mode}, state}
+  end
+
   @impl Parent.GenServer
   def handle_stopped_children(info, state) do
     [info] = Map.values(info)
