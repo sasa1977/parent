@@ -172,6 +172,13 @@ defmodule PeriodicTest do
     end
   end
 
+  describe "tick with `wait_job?: false`" do
+    test "returns error if the scheduled is in auto mode" do
+      scheduler = start_scheduler!(mode: :auto)
+      assert tick(scheduler) == {:error, :not_in_manual_mode}
+    end
+  end
+
   describe "tick with `wait_job?: true`" do
     test "returns when the process stops" do
       captured_output =
@@ -193,6 +200,11 @@ defmodule PeriodicTest do
     test "returns error if the job is not started" do
       scheduler = start_scheduler!(when: fn -> false end)
       assert sync_tick(scheduler) == {:error, :job_not_started}
+    end
+
+    test "returns error if the scheduled is in auto mode" do
+      scheduler = start_scheduler!(mode: :auto)
+      assert sync_tick(scheduler) == {:error, :not_in_manual_mode}
     end
 
     test "raises on timeout" do
