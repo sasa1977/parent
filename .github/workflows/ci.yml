@@ -1,0 +1,36 @@
+name: CI
+on:
+  pull_request:
+  push:
+
+jobs:
+  main:
+    # Old ubuntu needed to support erlang 22
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        include:
+          - elixir: '1.10.4'
+            otp: '22.3.4.27'
+            check-format: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            _build
+            deps
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - run: MIX_ENV=test mix compile --warnings-as-errors
+      - run: MIX_ENV=prod mix compile --warnings-as-errors
+      - run: mix format --check-formatted
+        if: ${{ matrix.check-format }}
+      - run: mix docs
+      - run: mix test
+      - run: mix dialyzer
