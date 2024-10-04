@@ -88,7 +88,7 @@ Parent.Client.return_children(some_parent, stopped_children)
 ### Dynamic supervisor with anonymous children
 
 ```elixir
-Parent.Supervisor.start_link([])
+Parent.Supervisor.start_link([], name: MySup)
 
 # set `ephemeral?: true` for dynamic children if child is temporary/transient
 {:ok, pid1} = Parent.Client.start_child(MySup, Parent.child_spec(Child, id: nil, ephemeral?: true))
