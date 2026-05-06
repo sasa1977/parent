@@ -621,7 +621,7 @@ defmodule Parent do
       timeout: :infinity,
       restart: :permanent,
       max_restarts: :infinity,
-      max_seconds: :timer.seconds(5),
+      max_seconds: 5,
       binds_to: [],
       shutdown_group: nil,
       ephemeral?: false
