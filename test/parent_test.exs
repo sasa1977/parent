@@ -34,7 +34,7 @@ defmodule ParentTest do
           ephemeral?: false,
           id: nil,
           max_restarts: :infinity,
-          max_seconds: 5000,
+          max_seconds: 5,
           meta: nil,
           restart: :permanent,
           shutdown: 5000,
