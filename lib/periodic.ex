@@ -298,7 +298,6 @@ defmodule Periodic do
   For a more detailed discussion, see [this blog post](https://www.theerlangelist.com/article/periodic).
   """
   use Parent.GenServer
-  require Logger
 
   @type opts :: [
           id: term,
