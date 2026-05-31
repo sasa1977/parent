@@ -307,8 +307,8 @@ defmodule Periodic do
           every: pos_integer,
           initial_delay: non_neg_integer,
           delay_mode: :regular | :shifted,
-          run: (() -> term) | {module, atom, [term]},
-          when: (() -> boolean) | {module, atom, [term]},
+          run: (-> term) | {module, atom, [term]},
+          when: (-> boolean) | {module, atom, [term]},
           on_overlap: :run | :ignore | :stop_previous,
           timeout: pos_integer | :infinity,
           job_shutdown: :brutal_kill | :infinity | non_neg_integer()

@@ -302,7 +302,7 @@ defmodule Parent do
 
   @type child_ref :: child_id | pid
 
-  @type start :: (() -> Supervisor.on_start_child()) | {module, atom, [term]}
+  @type start :: (-> Supervisor.on_start_child()) | {module, atom, [term]}
 
   @type shutdown :: non_neg_integer | :infinity | :brutal_kill
 
