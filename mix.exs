@@ -62,9 +62,7 @@ defmodule Parent.MixProject do
       links: %{
         "Github" => "https://github.com/sasa1977/parent",
         "Changelog" =>
-          "https://github.com/sasa1977/parent/blob/#{@version}/CHANGELOG.md##{
-            String.replace(@version, ".", "")
-          }"
+          "https://github.com/sasa1977/parent/blob/#{@version}/CHANGELOG.md##{String.replace(@version, ".", "")}"
       }
     ]
   end
