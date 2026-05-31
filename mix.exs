@@ -7,7 +7,7 @@ defmodule Parent.MixProject do
     [
       app: :parent,
       version: @version,
-      elixir: "~> 1.10",
+      elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
