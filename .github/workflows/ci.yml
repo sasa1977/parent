@@ -5,8 +5,7 @@ on:
 
 jobs:
   main:
-    # Old ubuntu needed to support erlang 22
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
