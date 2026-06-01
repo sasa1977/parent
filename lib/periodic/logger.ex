@@ -25,7 +25,7 @@ defmodule Periodic.Logger do
 
   defp log_level(:started, _meta), do: :info
   defp log_level(:skipped, _meta), do: :info
-  defp log_level(:stopped_previous, _meta), do: :warn
+  defp log_level(:stopped_previous, _meta), do: :warning
 
   defp log_level(:finished, meta),
     do: if(meta.reason in [:shutdown, :normal], do: :info, else: :error)

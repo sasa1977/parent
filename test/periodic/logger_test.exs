@@ -10,7 +10,7 @@ defmodule Periodic.LoggerTest do
 
   setup do
     Logger.configure(level: :debug)
-    on_exit(fn -> Logger.configure(level: :warn) end)
+    on_exit(fn -> Logger.configure(level: :warning) end)
     observe(:test_job)
   end
 

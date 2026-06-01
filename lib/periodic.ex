@@ -298,7 +298,6 @@ defmodule Periodic do
   For a more detailed discussion, see [this blog post](https://www.theerlangelist.com/article/periodic).
   """
   use Parent.GenServer
-  require Logger
 
   @type opts :: [
           id: term,
@@ -308,8 +307,8 @@ defmodule Periodic do
           every: pos_integer,
           initial_delay: non_neg_integer,
           delay_mode: :regular | :shifted,
-          run: (() -> term) | {module, atom, [term]},
-          when: (() -> boolean) | {module, atom, [term]},
+          run: (-> term) | {module, atom, [term]},
+          when: (-> boolean) | {module, atom, [term]},
           on_overlap: :run | :ignore | :stop_previous,
           timeout: pos_integer | :infinity,
           job_shutdown: :brutal_kill | :infinity | non_neg_integer()

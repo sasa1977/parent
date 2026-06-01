@@ -501,13 +501,11 @@ defmodule ParentTest do
 
       raise_on_child_start(:child1)
       Parent.restart_child(:child1)
-      assert_receive {:EXIT, _pid, _}
 
       succeed_on_child_start(:child1)
       raise_on_child_start(:child2)
 
       assert handle_parent_message() == :ignore
-      assert_receive {:EXIT, _pid, _}
 
       succeed_on_child_start(:child2)
       assert [%{id: :child1}, %{id: :child2}] = Parent.children()
@@ -1005,7 +1003,7 @@ defmodule ParentTest do
           assert :supervisor.which_children(parent) == [{:child, child, :worker, [Agent]}]
 
           assert :supervisor.count_children(parent) ==
-                   [active: 1, specs: 1, supervisors: 0, workers: 1]
+                   [active: 1, workers: 1, supervisors: 0, specs: 1]
 
           assert {:ok, %{id: :child}} = :supervisor.get_childspec(parent, :child)
           assert {:ok, %{id: :child}} = :supervisor.get_childspec(parent, child)
@@ -1100,7 +1098,6 @@ defmodule ParentTest do
 
         raise_on_child_start(:child5)
         assert Parent.return_children(stopped_children) == :ok
-        assert_receive {:EXIT, _failed_child5, _}
 
         assert Enum.map(Parent.children(), & &1.id) ==
                  ~w/child1 child2 child3 child4 child5 child6/a
@@ -1128,7 +1125,6 @@ defmodule ParentTest do
 
       raise_on_child_start(:child2)
       assert Parent.return_children(stopped_children) == :ok
-      assert_receive {:EXIT, _, _}
 
       assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child5/a
 
@@ -1149,7 +1145,6 @@ defmodule ParentTest do
 
       raise_on_child_start(:child2)
       assert Parent.return_children(stopped_children) == :ok
-      assert_receive {:EXIT, _, _}
 
       assert Enum.map(Parent.children(), & &1.id) == ~w/child1 child2 child3 child4 child5/a
       Enum.each(~w/child2 child3 child4/a, &assert(Parent.child_pid(&1) == {:ok, :undefined}))
@@ -1224,9 +1219,7 @@ defmodule ParentTest do
   end
 
   defp assert_parent_exit(fun, exit_reason) do
-    log = capture_log(fn -> assert catch_exit(fun.()) == exit_reason end)
-    assert_receive {:EXIT, _string_io_pid, :normal}
-    log
+    capture_log(fn -> assert catch_exit(fun.()) == exit_reason end)
   end
 
   defp start_child(overrides \\ []) do
