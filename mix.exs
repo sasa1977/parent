@@ -11,7 +11,7 @@ defmodule Parent.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
-      dialyzer: [plt_add_deps: :transitive, plt_add_apps: [:ex_unit]],
+      dialyzer: [plt_add_apps: [:ex_unit]],
       docs: docs(),
       package: package()
     ]
@@ -26,7 +26,7 @@ defmodule Parent.MixProject do
 
   defp deps do
     [
-      {:dialyxir, "~> 0.5", runtime: false, only: [:dev, :test]},
+      {:dialyxir, "~> 1.0", runtime: false, only: [:dev, :test]},
       {:ex_doc, "~> #{ex_doc_version()}", only: :dev, runtime: false},
       {:mox, "~> 0.5.0", only: :test},
       {:telemetry, "~> 0.4 or ~> 1.0"}
