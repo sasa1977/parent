@@ -118,9 +118,9 @@ defmodule Parent.GenServerTest do
 
       assert :supervisor.count_children(server) == [
                active: 2,
-               specs: 2,
+               workers: 1,
                supervisors: 1,
-               workers: 1
+               specs: 2
              ]
     end
 

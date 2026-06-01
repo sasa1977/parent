@@ -1005,7 +1005,7 @@ defmodule ParentTest do
           assert :supervisor.which_children(parent) == [{:child, child, :worker, [Agent]}]
 
           assert :supervisor.count_children(parent) ==
-                   [active: 1, specs: 1, supervisors: 0, workers: 1]
+                   [active: 1, workers: 1, supervisors: 0, specs: 1]
 
           assert {:ok, %{id: :child}} = :supervisor.get_childspec(parent, :child)
           assert {:ok, %{id: :child}} = :supervisor.get_childspec(parent, child)
